@@ -6,7 +6,7 @@ A Rust MCP (Model Context Protocol) server that provides LSP-powered code intell
 
 ## Architecture
 
-```
+```text
 AI Agent  ──── stdio (JSON-RPC 2.0) ────┐
                                          │
                                     ┌──── ▼ ────┐
@@ -60,7 +60,7 @@ Language support is configured per-project. Adding a new language requires only 
 
 ## Build & Run
 
-```
+```bash
 cargo build
 cargo run
 ```

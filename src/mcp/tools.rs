@@ -64,15 +64,21 @@ impl McpServer {
                 }
             };
 
-            let id = message.get("id").cloned().unwrap_or(Value::Null);
+            let id_opt = message.get("id").cloned();
+            let is_notification = id_opt.is_none();
+            let id = id_opt.unwrap_or(Value::Null);
             let method = message.get("method").and_then(|m| m.as_str());
             let params = message.get("params").cloned();
 
             let Some(method) = method else {
-                // -32600 Invalid Request
-                let response =
-                    protocol::error_response(id, protocol::INVALID_REQUEST, "missing method field");
-                protocol::write_message(&mut writer, &response).await?;
+                if !is_notification {
+                    let response = protocol::error_response(
+                        id,
+                        protocol::INVALID_REQUEST,
+                        "missing method field",
+                    );
+                    protocol::write_message(&mut writer, &response).await?;
+                }
                 continue;
             };
 
@@ -81,6 +87,7 @@ impl McpServer {
                 "notifications/initialized" => None,
                 "tools/list" => Some(self.handle_tools_list(&id)),
                 "tools/call" => Some(self.handle_tools_call(&id, &params)),
+                _ if is_notification => None,
                 _ => Some(protocol::error_response(
                     id,
                     protocol::METHOD_NOT_FOUND,
@@ -136,7 +143,13 @@ impl McpServer {
             }
         };
 
-        let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        let Some(tool_name) = params.get("name").and_then(|n| n.as_str()) else {
+            return protocol::error_response(
+                id.clone(),
+                protocol::INVALID_REQUEST,
+                "missing or invalid tools/call.params.name",
+            );
+        };
 
         match self.tools.get(tool_name) {
             Some(tool) => {

@@ -51,7 +51,7 @@ impl LspTransport {
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
             .spawn()
             .map_err(|e| LspError::Transport(format!("failed to spawn '{command}': {e}")))?;
 
@@ -72,6 +72,7 @@ impl LspTransport {
             BufReader::new(stdout),
             pending.clone(),
             child.clone(),
+            writer.clone(),
         ));
 
         Ok(Self {
@@ -139,11 +140,12 @@ async fn reader_task(
     mut reader: BufReader<ChildStdout>,
     pending: PendingMap,
     child: Arc<Mutex<Child>>,
+    writer: Arc<Mutex<BufWriter<ChildStdin>>>,
 ) {
     while let Ok(msg) = read_message(&mut reader).await {
         if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
-            let mut map = pending.lock().unwrap();
-            if let Some(tx) = map.remove(&id) {
+            let matched = { pending.lock().unwrap().remove(&id) };
+            if let Some(tx) = matched {
                 if let Some(error) = msg.get("error") {
                     let code = error.get("code").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
                     let message = error
@@ -156,6 +158,14 @@ async fn reader_task(
                     let result = msg.get("result").cloned().unwrap_or(Value::Null);
                     let _ = tx.send(Ok(result));
                 }
+            } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
+                // Server-initiated request — respond with MethodNotFound.
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32601, "message": format!("unsupported server request: {method}") }
+                });
+                let _ = write_message(&writer, &response).await;
             }
         } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
             eprintln!("[lsp] server notification: {method}");
@@ -228,6 +238,13 @@ async fn read_message(reader: &mut BufReader<ChildStdout>) -> Result<Value, LspE
 
     let length = content_length
         .ok_or_else(|| LspError::Transport("missing Content-Length header".into()))?;
+
+    const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
+    if length > MAX_BODY_BYTES {
+        return Err(LspError::Transport(format!(
+            "Content-Length {length} exceeds maximum {MAX_BODY_BYTES}"
+        )));
+    }
 
     let mut buf = vec![0u8; length];
     reader

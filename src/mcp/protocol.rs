@@ -124,6 +124,14 @@ pub async fn read_message<R: AsyncBufRead + AsyncRead + Unpin>(
         io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length header")
     })?;
 
+    const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+    if length > MAX_BODY_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Content-Length {length} exceeds maximum {MAX_BODY_BYTES}"),
+        ));
+    }
+
     let mut buf = vec![0u8; length];
     reader.read_exact(&mut buf).await?;
     let body = String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

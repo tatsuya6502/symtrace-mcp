@@ -39,6 +39,7 @@ pub struct VersionedTextDocumentIdentifier {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextDocumentContentChangeEvent {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub range: Option<Range>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub range_length: Option<u32>,
@@ -103,6 +104,7 @@ pub struct ServerCapabilities {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hover {
     pub contents: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub range: Option<Range>,
 }
 
@@ -110,6 +112,7 @@ pub struct Hover {
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostic {
     pub range: Range,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub severity: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<Value>,
