@@ -50,7 +50,7 @@ symtrace-mcp communicates with language servers via the Language Server Protocol
 |----------|----------------|--------|
 | Rust | [rust-analyzer](https://rust-analyzer.github.io/) | Planned (P1) |
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | Planned |
-| Python | [pylsp](https://github.com/python-lsp/python-lsp-server) | Planned |
+| Python | [pyright](https://github.com/microsoft/pyright) | Planned |
 
 Language support is configured per-project. Adding a new language requires only a language server entry — no code changes needed (P3).
 
