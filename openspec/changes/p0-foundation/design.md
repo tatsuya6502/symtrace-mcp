@@ -49,7 +49,7 @@ Reference projects: serena (Python, LSP client), serena-fork (lazy language serv
 ### D4: Module structure matches spec §9.3
 
 **Choice**: Follow the directory layout from the design spec exactly:
-```
+```text
 src/
 ├── main.rs
 ├── mcp/          (protocol.rs, tools.rs)
