@@ -83,10 +83,13 @@ impl McpServer {
             };
 
             let response = match method {
-                "initialize" => self.handle_initialize(&id, &params),
+                "initialize" if !is_notification => self.handle_initialize(&id, &params),
+                "initialize" => None,
                 "notifications/initialized" => None,
-                "tools/list" => Some(self.handle_tools_list(&id)),
-                "tools/call" => Some(self.handle_tools_call(&id, &params)),
+                "tools/list" if !is_notification => Some(self.handle_tools_list(&id)),
+                "tools/list" => None,
+                "tools/call" if !is_notification => Some(self.handle_tools_call(&id, &params)),
+                "tools/call" => None,
                 _ if is_notification => None,
                 _ => Some(protocol::error_response(
                     id,
@@ -164,7 +167,7 @@ impl McpServer {
             }
             None => protocol::error_response(
                 id.clone(),
-                protocol::METHOD_NOT_FOUND,
+                protocol::INVALID_PARAMS,
                 &format!("unknown tool: {tool_name}"),
             ),
         }

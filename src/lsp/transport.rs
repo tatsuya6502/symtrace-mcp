@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -42,6 +42,7 @@ pub struct LspTransport {
     next_id: AtomicI64,
     child: Arc<Mutex<Child>>,
     _reader_handle: tokio::task::JoinHandle<()>,
+    closed: Arc<AtomicBool>,
 }
 
 impl LspTransport {
@@ -67,12 +68,14 @@ impl LspTransport {
         let writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
         let pending: PendingMap = Arc::new(std::sync::Mutex::new(HashMap::new()));
         let child = Arc::new(Mutex::new(child));
+        let closed = Arc::new(AtomicBool::new(false));
 
         let reader_handle = tokio::spawn(reader_task(
             BufReader::new(stdout),
             pending.clone(),
             child.clone(),
             writer.clone(),
+            closed.clone(),
         ));
 
         Ok(Self {
@@ -81,11 +84,15 @@ impl LspTransport {
             next_id: AtomicI64::new(1),
             child,
             _reader_handle: reader_handle,
+            closed,
         })
     }
 
     /// Send a JSON-RPC request and await the response (3.4).
     pub async fn send_request(&self, method: &str, params: Value) -> Result<Value, LspError> {
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(LspError::ProcessExited);
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
 
@@ -112,6 +119,9 @@ impl LspTransport {
 
     /// Send a JSON-RPC notification — fire-and-forget (3.5).
     pub async fn send_notification(&self, method: &str, params: Value) -> Result<(), LspError> {
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(LspError::ProcessExited);
+        }
         let message = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -141,28 +151,41 @@ async fn reader_task(
     pending: PendingMap,
     child: Arc<Mutex<Child>>,
     writer: Arc<Mutex<BufWriter<ChildStdin>>>,
+    closed: Arc<AtomicBool>,
 ) {
     while let Ok(msg) = read_message(&mut reader).await {
-        if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
-            let matched = { pending.lock().unwrap().remove(&id) };
-            if let Some(tx) = matched {
-                if let Some(error) = msg.get("error") {
-                    let code = error.get("code").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
-                    let message = error
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown error")
-                        .to_string();
-                    let _ = tx.send(Err(LspError::JsonRpc { code, message }));
-                } else {
-                    let result = msg.get("result").cloned().unwrap_or(Value::Null);
-                    let _ = tx.send(Ok(result));
+        let raw_id = msg.get("id");
+        if let Some(id_val) = raw_id {
+            if let Some(id) = id_val.as_i64() {
+                // Integer ID — try to match a pending client request.
+                let matched = { pending.lock().unwrap().remove(&id) };
+                if let Some(tx) = matched {
+                    if let Some(error) = msg.get("error") {
+                        let code = error.get("code").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
+                        let message = error
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown error")
+                            .to_string();
+                        let _ = tx.send(Err(LspError::JsonRpc { code, message }));
+                    } else {
+                        let result = msg.get("result").cloned().unwrap_or(Value::Null);
+                        let _ = tx.send(Ok(result));
+                    }
+                } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
+                    // Server-initiated request (integer ID).
+                    let response = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32601, "message": format!("unsupported server request: {method}") }
+                    });
+                    let _ = write_message(&writer, &response).await;
                 }
             } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
-                // Server-initiated request — respond with MethodNotFound.
+                // Server-initiated request (string or other ID).
                 let response = serde_json::json!({
                     "jsonrpc": "2.0",
-                    "id": id,
+                    "id": id_val,
                     "error": { "code": -32601, "message": format!("unsupported server request: {method}") }
                 });
                 let _ = write_message(&writer, &response).await;
@@ -171,6 +194,8 @@ async fn reader_task(
             eprintln!("[lsp] server notification: {method}");
         }
     }
+
+    closed.store(true, Ordering::Relaxed);
 
     // Error all remaining pending requests (3.7).
     {

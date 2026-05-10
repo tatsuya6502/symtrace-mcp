@@ -133,6 +133,8 @@ pub struct TextEdit {
 pub struct WorkspaceEdit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub changes: Option<HashMap<String, Vec<TextEdit>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_changes: Option<Value>,
 }
 
 // --- 2.5 Call hierarchy types ---
