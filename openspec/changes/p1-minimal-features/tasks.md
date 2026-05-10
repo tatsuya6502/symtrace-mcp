@@ -8,16 +8,16 @@
 
 ## 2. File Management
 
-- [ ] 2.1 Create `src/lsp/file_manager.rs` with `FileManager` struct tracking `open_files: HashMap<String, OpenFile>` (URI → version + mtime)
-- [ ] 2.2 Implement `FileManager::ensure_open` — read file from disk, send `didOpen` if new or `didChange` if mtime changed, update tracking
-- [ ] 2.3 Implement `FileManager::close` — send `didClose` and remove from tracking
+- [x] 2.1 Create `src/lsp/file_manager.rs` with `FileManager` struct tracking `open_files: HashMap<String, OpenFile>` (URI → version + mtime)
+- [x] 2.2 Implement `FileManager::ensure_open` — read file from disk, send `didOpen` if new or `didChange` if mtime changed, update tracking
+- [x] 2.3 Implement `FileManager::close` — send `didClose` and remove from tracking
 
 ## 3. Server Manager
 
-- [ ] 3.1 Create `src/server/manager.rs` with `LanguageServerManager` struct holding configs, clients map, file managers map, idle monitor, and root path
-- [ ] 3.2 Implement `get_client_for_file` — resolve file extension to language, start server lazily if needed, return guarded client reference
-- [ ] 3.3 Implement `start_server` — create `LspClient`, call `start`, store in clients map
-- [ ] 3.4 Implement `stop_server` — call `LspClient::shutdown`, remove from clients map, clean up file manager
+- [x] 3.1 Create `src/server/manager.rs` with `LanguageServerManager` struct holding configs, clients map, file managers map, idle monitor, and root path
+- [x] 3.2 Implement `get_client_for_file` — resolve file extension to language, start server lazily if needed, return guarded client reference
+- [x] 3.3 Implement `start_server` — create `LspClient`, call `start`, store in clients map
+- [x] 3.4 Implement `stop_server` — call `LspClient::shutdown`, remove from clients map, clean up file manager
 
 ## 4. Idle Monitor
 
