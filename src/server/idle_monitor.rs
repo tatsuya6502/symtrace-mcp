@@ -24,6 +24,7 @@ impl IdleMonitor {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_check_interval(mut self, interval: Duration) -> Self {
         self.check_interval = interval;
         self

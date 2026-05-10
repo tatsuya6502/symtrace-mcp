@@ -3,10 +3,15 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use tokio::io::{BufReader, stdin, stdout};
 
+use super::handlers;
 use super::protocol;
+use crate::server::idle_monitor::IdleMonitor;
+use crate::server::manager::LanguageServerManager;
 
 /// Error returned by tool handlers, carrying an MCP error code.
 pub struct ToolError {
@@ -45,17 +50,59 @@ struct Tool {
 /// MCP server that reads JSON-RPC requests from stdin and writes responses to stdout.
 pub struct McpServer {
     tools: HashMap<String, Tool>,
+    manager: Arc<LanguageServerManager>,
+    monitor: Arc<IdleMonitor>,
+}
+
+/// Wrap an async handler into a boxed closure that clones the shared state per call.
+macro_rules! tool_handler {
+    ($manager:expr, $monitor:expr, $handler:path) => {{
+        let manager = $manager.clone();
+        let monitor = $monitor.clone();
+        Box::new(move |args: Value| {
+            let m = manager.clone();
+            let mon = monitor.clone();
+            Box::pin(async move { $handler(&m, &mon, args).await })
+                as Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>>
+        })
+    }};
 }
 
 impl McpServer {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(root: PathBuf) -> Self {
+        let manager = Arc::new(LanguageServerManager::new(root));
+        let monitor = Arc::new(IdleMonitor::new(manager.clone()));
+
+        let mut server = Self {
             tools: HashMap::new(),
-        }
+            manager: manager.clone(),
+            monitor: monitor.clone(),
+        };
+
+        // Register the three MCP tools (6.2).
+        server.register_tool(
+            "find_references",
+            "Find all references to the symbol at the given position.",
+            handlers::find_references_schema(),
+            tool_handler!(manager, monitor, handlers::find_references),
+        );
+        server.register_tool(
+            "goto_definition",
+            "Go to the definition of the symbol at the given position.",
+            handlers::goto_definition_schema(),
+            tool_handler!(manager, monitor, handlers::goto_definition),
+        );
+        server.register_tool(
+            "find_implementations",
+            "Find implementations of the trait or type at the given position.",
+            handlers::find_implementations_schema(),
+            tool_handler!(manager, monitor, handlers::find_implementations),
+        );
+
+        server
     }
 
-    /// Register a tool handler by name.
-    pub fn register_tool(
+    fn register_tool(
         &mut self,
         name: impl Into<String>,
         description: impl Into<String>,
@@ -74,6 +121,9 @@ impl McpServer {
 
     /// Run the MCP server event loop. Reads from stdin, writes to stdout.
     pub async fn run(&mut self) -> std::io::Result<()> {
+        // Spawn idle monitor as a background task (6.3).
+        let monitor_handle = tokio::spawn(self.monitor.clone().run());
+
         let mut reader = BufReader::new(stdin());
         let mut writer = stdout();
 
@@ -84,7 +134,6 @@ impl McpServer {
                     if e.kind() == std::io::ErrorKind::UnexpectedEof {
                         break;
                     }
-                    // -32700 Parse error
                     let response = protocol::error_response(
                         Value::Null,
                         protocol::PARSE_ERROR,
@@ -135,6 +184,10 @@ impl McpServer {
                 protocol::write_message(&mut writer, &response).await?;
             }
         }
+
+        // Graceful shutdown (6.4).
+        monitor_handle.abort();
+        self.manager.shutdown_all().await;
 
         Ok(())
     }
@@ -196,9 +249,7 @@ impl McpServer {
                     .unwrap_or(Value::Object(Default::default()));
                 match (tool.handler)(args).await {
                     Ok(result) => protocol::success_response(id, result),
-                    Err(e) => {
-                        protocol::error_response(id.clone(), e.code, &e.message)
-                    }
+                    Err(e) => protocol::error_response(id.clone(), e.code, &e.message),
                 }
             }
             None => protocol::error_response(

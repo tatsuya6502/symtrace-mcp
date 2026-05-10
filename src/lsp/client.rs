@@ -32,6 +32,7 @@ pub struct LspClient {
     transport: LspTransport,
     root_uri: String,
     open_files: HashSet<String>,
+    #[allow(dead_code)]
     capabilities: ServerCapabilities,
 }
 
@@ -175,21 +176,25 @@ impl LspClient {
     }
 
     /// Return whether a file is currently tracked as open.
+    #[allow(dead_code)]
     pub fn is_file_open(&self, uri: &str) -> bool {
         self.open_files.contains(uri)
     }
 
     /// Remove a file from the open tracking set (after didClose sent).
+    #[allow(dead_code)]
     pub fn mark_file_closed(&mut self, uri: &str) {
         self.open_files.remove(uri);
     }
 
     /// Get the server capabilities received during initialization.
+    #[allow(dead_code)]
     pub fn capabilities(&self) -> &ServerCapabilities {
         &self.capabilities
     }
 
     /// Get the root URI.
+    #[allow(dead_code)]
     pub fn root_uri(&self) -> &str {
         &self.root_uri
     }
@@ -321,15 +326,14 @@ fn parse_location_list(value: &Value) -> Vec<super::types::Location> {
     let mut locations = Vec::new();
     for item in arr {
         // LocationLink has `targetUri` + `targetRange`.
-        if let Some(uri) = item.get("targetUri").and_then(|v| v.as_str()) {
-            if let Some(range) = item.get("targetRange") {
-                if let Ok(range) = serde_json::from_value(range.clone()) {
-                    locations.push(super::types::Location {
-                        uri: uri.to_string(),
-                        range,
-                    });
-                }
-            }
+        if let Some(uri) = item.get("targetUri").and_then(|v| v.as_str())
+            && let Some(range) = item.get("targetRange")
+            && let Ok(range) = serde_json::from_value(range.clone())
+        {
+            locations.push(super::types::Location {
+                uri: uri.to_string(),
+                range,
+            });
             continue;
         }
         // Plain Location has `uri` + `range`.

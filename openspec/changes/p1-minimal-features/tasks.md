@@ -37,7 +37,7 @@
 
 ## 6. Wiring
 
-- [ ] 6.1 Wire `LanguageServerManager` into `McpServer` — create on startup, pass to tool handlers
-- [ ] 6.2 Register the three tools in `McpServer::new` with their schemas
-- [ ] 6.3 Wire `IdleMonitor` — spawn background task on server start, pass manager reference
-- [ ] 6.4 Implement graceful shutdown — stop all language servers when MCP event loop ends
+- [x] 6.1 Wire `LanguageServerManager` into `McpServer` — create on startup, pass to tool handlers
+- [x] 6.2 Register the three tools in `McpServer::new` with their schemas
+- [x] 6.3 Wire `IdleMonitor` — spawn background task on server start, pass manager reference
+- [x] 6.4 Implement graceful shutdown — stop all language servers when MCP event loop ends

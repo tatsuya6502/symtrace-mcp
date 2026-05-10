@@ -113,6 +113,7 @@ impl FileManager {
     }
 
     /// Close a file in the language server and remove it from tracking.
+    #[allow(dead_code)]
     pub async fn close(
         &mut self,
         client: &mut LspClient,

@@ -105,7 +105,7 @@ impl LanguageServerManager {
         let ext = path.extension()?.to_str()?;
         self.configs
             .values()
-            .find(|cfg| cfg.extensions.iter().any(|e| *e == ext))
+            .find(|cfg| cfg.extensions.contains(&ext))
             .map(|cfg| cfg.language)
     }
 
