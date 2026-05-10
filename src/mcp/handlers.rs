@@ -258,12 +258,14 @@ impl ToolParams {
         let line = value
             .get("line")
             .and_then(|v| v.as_u64())
+            .filter(|&n| n <= u32::MAX as u64)
             .ok_or_else(|| ToolError::invalid_params("missing or invalid 'line' parameter"))?
             as u32;
 
         let column = value
             .get("column")
             .and_then(|v| v.as_u64())
+            .filter(|&n| n <= u32::MAX as u64)
             .ok_or_else(|| ToolError::invalid_params("missing or invalid 'column' parameter"))?
             as u32;
 
