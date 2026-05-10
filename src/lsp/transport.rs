@@ -90,14 +90,14 @@ impl LspTransport {
 
     /// Send a JSON-RPC request and await the response (3.4).
     pub async fn send_request(&self, method: &str, params: Value) -> Result<Value, LspError> {
-        if self.closed.load(Ordering::Relaxed) {
-            return Err(LspError::ProcessExited);
-        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
 
         {
             let mut map = self.pending.lock().unwrap();
+            if self.closed.load(Ordering::Acquire) {
+                return Err(LspError::ProcessExited);
+            }
             map.insert(id, tx);
         }
 
@@ -195,11 +195,10 @@ async fn reader_task(
         }
     }
 
-    closed.store(true, Ordering::Relaxed);
-
     // Error all remaining pending requests (3.7).
     {
         let mut map = pending.lock().unwrap();
+        closed.store(true, Ordering::Release);
         for (_, tx) in map.drain() {
             let _ = tx.send(Err(LspError::ProcessExited));
         }
