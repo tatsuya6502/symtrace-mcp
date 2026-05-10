@@ -153,7 +153,14 @@ async fn reader_task(
     writer: Arc<Mutex<BufWriter<ChildStdin>>>,
     closed: Arc<AtomicBool>,
 ) {
-    while let Ok(msg) = read_message(&mut reader).await {
+    loop {
+        let msg = match read_message(&mut reader).await {
+            Ok(msg) => msg,
+            Err(e) => {
+                eprintln!("[lsp] reader error: {e}");
+                break;
+            }
+        };
         let raw_id = msg.get("id");
         if let Some(id_val) = raw_id {
             if let Some(id) = id_val.as_i64() {
