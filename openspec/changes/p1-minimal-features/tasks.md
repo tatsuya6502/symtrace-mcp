@@ -1,10 +1,10 @@
 ## 1. LSP Client
 
-- [ ] 1.1 Create `src/lsp/client.rs` with `LspClient` struct owning `LspTransport`, `root_uri`, `open_files: HashSet<String>`, and `capabilities: ServerCapabilities`
-- [ ] 1.2 Implement `LspClient::start` — spawn child process via `LspTransport::spawn`, send `initialize` with client capabilities and root URI, receive `InitializeResult`, send `initialized` notification
-- [ ] 1.3 Implement `LspClient::shutdown` — send `shutdown` request, wait for response, send `exit` notification
-- [ ] 1.4 Add rust-analyzer–specific initialization parameters in `src/language/rust.rs` (hover capability, file operations, etc.)
-- [ ] 1.5 Implement index readiness wait — poll `textDocument/documentSymbol` until non-empty result or timeout
+- [x] 1.1 Create `src/lsp/client.rs` with `LspClient` struct owning `LspTransport`, `root_uri`, `open_files: HashSet<String>`, and `capabilities: ServerCapabilities`
+- [x] 1.2 Implement `LspClient::start` — spawn child process via `LspTransport::spawn`, send `initialize` with client capabilities and root URI, receive `InitializeResult`, send `initialized` notification
+- [x] 1.3 Implement `LspClient::shutdown` — send `shutdown` request, wait for response, send `exit` notification
+- [x] 1.4 Add rust-analyzer–specific initialization parameters in `src/language/rust.rs` (hover capability, file operations, etc.)
+- [x] 1.5 Implement index readiness wait — poll `textDocument/documentSymbol` until non-empty result or timeout
 
 ## 2. File Management
 
