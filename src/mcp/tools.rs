@@ -36,9 +36,7 @@ impl ToolError {
 }
 
 type ToolHandler = Box<
-    dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>>
-        + Send
-        + Sync,
+    dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>> + Send + Sync,
 >;
 
 struct Tool {

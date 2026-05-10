@@ -123,21 +123,17 @@ impl LanguageServerManager {
     pub async fn get_client_for_file(
         &self,
         path: &Path,
-    ) -> Result<(
-        Language,
-        tokio::sync::MutexGuard<'_, HashMap<Language, ServerEntry>>,
-    ),
-    ManagerError,
+    ) -> Result<
+        (
+            Language,
+            tokio::sync::MutexGuard<'_, HashMap<Language, ServerEntry>>,
+        ),
+        ManagerError,
     > {
-        let language = self
-            .language_for_file(path)
-            .ok_or_else(|| {
-                let ext = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("???");
-                ManagerError::UnsupportedLanguage(ext.to_string())
-            })?;
+        let language = self.language_for_file(path).ok_or_else(|| {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("???");
+            ManagerError::UnsupportedLanguage(ext.to_string())
+        })?;
 
         let mut servers = self.servers.lock().await;
 
@@ -155,21 +151,19 @@ impl LanguageServerManager {
         servers: &mut HashMap<Language, ServerEntry>,
         language: Language,
     ) -> Result<(), ManagerError> {
-        let cfg = self.configs.get(&language).expect("config must exist for language");
+        let cfg = self
+            .configs
+            .get(&language)
+            .expect("config must exist for language");
 
         let capabilities = match language {
             Language::Rust => crate::language::rust::client_capabilities(),
         };
 
         let args: Vec<&str> = cfg.args.iter().map(|s| s.as_str()).collect();
-        let client = LspClient::start(
-            &cfg.command,
-            &args,
-            &self.root,
-            capabilities,
-        )
-        .await
-        .map_err(|e| ManagerError::StartupFailed(e.to_string()))?;
+        let client = LspClient::start(&cfg.command, &args, &self.root, capabilities)
+            .await
+            .map_err(|e| ManagerError::StartupFailed(e.to_string()))?;
 
         // Wait for the server to finish indexing (30s timeout).
         let timeout = std::time::Duration::from_secs(30);

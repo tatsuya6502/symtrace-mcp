@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::transport::LspTransport;
 use super::types::ServerCapabilities;
+use crate::uri::path_to_uri;
 
 /// Error type for LSP client operations.
 #[derive(Debug)]
@@ -65,8 +66,8 @@ impl LspClient {
             .await
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
-        let init_result: super::types::InitializeResult =
-            serde_json::from_value(result).map_err(|e| ClientError::Protocol(format!("failed to parse InitializeResult: {e}")))?;
+        let init_result: super::types::InitializeResult = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse InitializeResult: {e}")))?;
 
         // Send initialized notification.
         transport
@@ -100,10 +101,7 @@ impl LspClient {
         self.open_files.clear();
 
         // Send shutdown request.
-        let _ = self
-            .transport
-            .send_request("shutdown", Value::Null)
-            .await;
+        let _ = self.transport.send_request("shutdown", Value::Null).await;
 
         // Send exit notification.
         let _ = self.transport.send_notification("exit", Value::Null).await;
@@ -172,7 +170,9 @@ impl LspClient {
                 serde_json::json!({ "textDocument": { "uri": uri } }),
             )
             .await
-            .map_err(|e| ClientError::Transport(e.to_string()))
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+        self.open_files.remove(uri);
+        Ok(())
     }
 
     /// Return whether a file is currently tracked as open.
@@ -267,10 +267,8 @@ impl LspClient {
 
     /// Send `textDocument/documentSymbol` and return whether the server
     /// appears ready (returns a non-empty result).
-    pub async fn document_symbol(
-        &self,
-        uri: &str,
-    ) -> Result<bool, ClientError> {
+    #[allow(dead_code)]
+    pub async fn document_symbol(&self, uri: &str) -> Result<bool, ClientError> {
         let result = self
             .transport
             .send_request(
@@ -289,21 +287,32 @@ impl LspClient {
         }
     }
 
-    /// Wait for the language server to finish indexing by polling
-    /// `textDocument/documentSymbol` until a non-empty result arrives.
-    ///
-    /// Uses the root `Cargo.toml` as the probe file. Polls every 500ms
-    /// with the given overall timeout.
-    pub async fn wait_for_index(&self, timeout: std::time::Duration) -> Result<(), ClientError> {
-        // Probe with the root URI itself — documentSymbol on a project root
-        // or any known file works as a readiness signal.
-        let probe_uri = format!("{}/src/main.rs", self.root_uri);
+    /// Send `workspace/symbol` and return whether the server appears ready
+    /// (returns a non-empty result).
+    pub async fn workspace_symbol(&self, query: &str) -> Result<bool, ClientError> {
+        let result = self
+            .transport
+            .send_request("workspace/symbol", serde_json::json!({ "query": query }))
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
 
+        if let Some(symbols) = result.as_array() {
+            Ok(!symbols.is_empty())
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Wait for the language server to finish indexing by polling
+    /// `workspace/symbol` with an empty query until a non-empty result arrives.
+    ///
+    /// Polls every 500ms with the given overall timeout.
+    pub async fn wait_for_index(&self, timeout: std::time::Duration) -> Result<(), ClientError> {
         let start = std::time::Instant::now();
         let poll_interval = std::time::Duration::from_millis(500);
 
         loop {
-            match self.document_symbol(&probe_uri).await {
+            match self.workspace_symbol("").await {
                 Ok(true) => return Ok(()),
                 Ok(false) | Err(_) => {
                     if start.elapsed() >= timeout {
@@ -342,12 +351,4 @@ fn parse_location_list(value: &Value) -> Vec<super::types::Location> {
         }
     }
     locations
-}
-
-/// Convert a filesystem path to a file:// URI.
-fn path_to_uri(path: &Path) -> String {
-    let canonical = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
-    format!("file://{}", canonical.display())
 }

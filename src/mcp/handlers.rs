@@ -10,6 +10,7 @@ use super::tools::ToolError;
 use crate::lsp::types::{Location, Position};
 use crate::server::idle_monitor::IdleMonitor;
 use crate::server::manager::{LanguageServerManager, ManagerError};
+use crate::uri::uri_to_path;
 
 // ---------------------------------------------------------------------------
 // Tool schemas (5.1)
@@ -102,9 +103,10 @@ async fn execute_query(
     let path = Path::new(&p.file_path);
 
     // Validate path (5.7)
-    if !path.try_exists().map_err(|e| {
-        ToolError::invalid_params(format!("cannot check path {}: {e}", p.file_path))
-    })? {
+    if !path
+        .try_exists()
+        .map_err(|e| ToolError::invalid_params(format!("cannot check path {}: {e}", p.file_path)))?
+    {
         return Err(ToolError::invalid_params(format!(
             "file not found: {}",
             p.file_path
@@ -122,9 +124,7 @@ async fn execute_query(
         .get_client_for_file(path)
         .await
         .map_err(|e| match e {
-            ManagerError::UnsupportedLanguage(_) => {
-                ToolError::invalid_params(e.to_string())
-            }
+            ManagerError::UnsupportedLanguage(_) => ToolError::invalid_params(e.to_string()),
             ManagerError::StartupFailed(_) | ManagerError::ClientError(_) => {
                 ToolError::internal(e.to_string())
             }
@@ -158,9 +158,7 @@ async fn execute_query(
     let locations = match kind {
         QueryKind::References => entry.client.references(&uri, position).await,
         QueryKind::Definition => entry.client.goto_definition(&uri, position).await,
-        QueryKind::Implementations => {
-            entry.client.implementations(&uri, position).await
-        }
+        QueryKind::Implementations => entry.client.implementations(&uri, position).await,
     }
     .map_err(|e| ToolError::internal(e.to_string()))?;
 
@@ -199,7 +197,13 @@ fn format_text(locations: &[Location], no_results_msg: &str) -> String {
         let col = loc.range.start.character as usize + 1;
 
         let line_text = read_line_text(&mut file_cache, &path, loc.range.start.line as usize);
-        lines.push(format!("{}:{}:{}  {}", path.display(), line_num, col, line_text));
+        lines.push(format!(
+            "{}:{}:{}  {}",
+            path.display(),
+            line_num,
+            col,
+            line_text
+        ));
         file_set.entry(path).or_insert(());
     }
 
@@ -218,8 +222,7 @@ fn format_json(locations: &[Location]) -> String {
         .iter()
         .map(|loc| {
             let path = uri_to_path(&loc.uri);
-            let line_text =
-                read_line_text(&mut file_cache, &path, loc.range.start.line as usize);
+            let line_text = read_line_text(&mut file_cache, &path, loc.range.start.line as usize);
 
             serde_json::json!({
                 "file_path": path.display().to_string(),
@@ -249,24 +252,20 @@ impl ToolParams {
         let file_path = value
             .get("file_path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::invalid_params("missing or invalid 'file_path' parameter")
-            })?
+            .ok_or_else(|| ToolError::invalid_params("missing or invalid 'file_path' parameter"))?
             .to_string();
 
         let line = value
             .get("line")
             .and_then(|v| v.as_u64())
-            .ok_or_else(|| {
-                ToolError::invalid_params("missing or invalid 'line' parameter")
-            })? as u32;
+            .ok_or_else(|| ToolError::invalid_params("missing or invalid 'line' parameter"))?
+            as u32;
 
         let column = value
             .get("column")
             .and_then(|v| v.as_u64())
-            .ok_or_else(|| {
-                ToolError::invalid_params("missing or invalid 'column' parameter")
-            })? as u32;
+            .ok_or_else(|| ToolError::invalid_params("missing or invalid 'column' parameter"))?
+            as u32;
 
         if line == 0 {
             return Err(ToolError::invalid_params("'line' must be >= 1 (1-based)"));
@@ -275,10 +274,7 @@ impl ToolParams {
             return Err(ToolError::invalid_params("'column' must be >= 1 (1-based)"));
         }
 
-        let json = value
-            .get("json")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let json = value.get("json").and_then(|v| v.as_bool()).unwrap_or(false);
 
         Ok(Self {
             file_path,
@@ -289,26 +285,17 @@ impl ToolParams {
     }
 }
 
-/// Convert `file:///path/to/file` to a `PathBuf`.
-fn uri_to_path(uri: &str) -> PathBuf {
-    uri.strip_prefix("file://")
-        .unwrap_or(uri)
-        .into()
-}
-
 /// Read a specific line (0-based index) from a file, caching contents.
 fn read_line_text(
     cache: &mut HashMap<PathBuf, Vec<String>>,
     path: &Path,
     line_idx: usize,
 ) -> String {
-    let lines = cache
-        .entry(path.to_path_buf())
-        .or_insert_with(|| {
-            std::fs::read_to_string(path)
-                .map(|s| s.lines().map(|l| l.to_string()).collect())
-                .unwrap_or_default()
-        });
+    let lines = cache.entry(path.to_path_buf()).or_insert_with(|| {
+        std::fs::read_to_string(path)
+            .map(|s| s.lines().map(|l| l.to_string()).collect())
+            .unwrap_or_default()
+    });
     lines
         .get(line_idx)
         .map(|l| l.trim().to_string())

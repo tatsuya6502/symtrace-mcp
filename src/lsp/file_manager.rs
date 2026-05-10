@@ -3,6 +3,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use super::client::{ClientError, LspClient};
+use crate::uri::path_to_uri;
 
 /// Metadata for a file currently tracked as open in the language server.
 struct OpenFile {
@@ -70,7 +71,9 @@ impl FileManager {
         language_id: &str,
     ) -> Result<String, FileError> {
         let uri = path_to_uri(path);
-        let metadata = path.metadata().map_err(|e| FileError::Io(format!("failed to stat {}: {e}", path.display())))?;
+        let metadata = path
+            .metadata()
+            .map_err(|e| FileError::Io(format!("failed to stat {}: {e}", path.display())))?;
         let mtime = metadata.modified().map_err(|e| {
             FileError::Io(format!("failed to get mtime for {}: {e}", path.display()))
         })?;
@@ -97,9 +100,7 @@ impl FileManager {
         // File not open — send didOpen.
         let text = read_file(path)?;
         let version = 1;
-        client
-            .did_open(&uri, &text, version, language_id)
-            .await?;
+        client.did_open(&uri, &text, version, language_id).await?;
 
         self.open_files.insert(
             uri.clone(),
@@ -114,11 +115,7 @@ impl FileManager {
 
     /// Close a file in the language server and remove it from tracking.
     #[allow(dead_code)]
-    pub async fn close(
-        &mut self,
-        client: &mut LspClient,
-        uri: &str,
-    ) -> Result<(), FileError> {
+    pub async fn close(&mut self, client: &mut LspClient, uri: &str) -> Result<(), FileError> {
         if self.open_files.remove(uri).is_some() {
             client.did_close(uri).await?;
         }
@@ -136,15 +133,6 @@ impl FileManager {
 }
 
 fn read_file(path: &Path) -> Result<String, FileError> {
-    std::fs::read_to_string(path).map_err(|e| {
-        FileError::Io(format!("failed to read {}: {e}", path.display()))
-    })
-}
-
-/// Convert a filesystem path to a file:// URI.
-fn path_to_uri(path: &Path) -> String {
-    let canonical = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
-    format!("file://{}", canonical.display())
+    std::fs::read_to_string(path)
+        .map_err(|e| FileError::Io(format!("failed to read {}: {e}", path.display())))
 }
