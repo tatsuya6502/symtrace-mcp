@@ -2,14 +2,43 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use tokio::io::{BufReader, stdin, stdout};
 
 use super::protocol;
 
-type ToolHandler = Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>;
+/// Error returned by tool handlers, carrying an MCP error code.
+pub struct ToolError {
+    pub code: i64,
+    pub message: String,
+}
+
+impl ToolError {
+    pub fn invalid_params(msg: impl Into<String>) -> Self {
+        Self {
+            code: protocol::INVALID_PARAMS,
+            message: msg.into(),
+        }
+    }
+
+    pub fn internal(msg: impl Into<String>) -> Self {
+        Self {
+            code: protocol::INTERNAL_ERROR,
+            message: msg.into(),
+        }
+    }
+}
+
+type ToolHandler = Box<
+    dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>>
+        + Send
+        + Sync,
+>;
 
 struct Tool {
     description: String,
+    input_schema: Value,
     handler: ToolHandler,
 }
 
@@ -30,12 +59,14 @@ impl McpServer {
         &mut self,
         name: impl Into<String>,
         description: impl Into<String>,
+        input_schema: Value,
         handler: ToolHandler,
     ) {
         self.tools.insert(
             name.into(),
             Tool {
                 description: description.into(),
+                input_schema,
                 handler,
             },
         );
@@ -88,7 +119,9 @@ impl McpServer {
                 "notifications/initialized" => None,
                 "tools/list" if !is_notification => Some(self.handle_tools_list(&id)),
                 "tools/list" => None,
-                "tools/call" if !is_notification => Some(self.handle_tools_call(&id, &params)),
+                "tools/call" if !is_notification => {
+                    Some(self.handle_tools_call(&id, &params).await)
+                }
                 "tools/call" => None,
                 _ if is_notification => None,
                 _ => Some(protocol::error_response(
@@ -128,13 +161,14 @@ impl McpServer {
                 serde_json::json!({
                     "name": name,
                     "description": tool.description,
+                    "inputSchema": tool.input_schema,
                 })
             })
             .collect();
         protocol::success_response(id, serde_json::json!({ "tools": tools }))
     }
 
-    fn handle_tools_call(&self, id: &Value, params: &Option<Value>) -> Value {
+    async fn handle_tools_call(&self, id: &Value, params: &Option<Value>) -> Value {
         let params = match params {
             Some(p) => p,
             None => {
@@ -160,9 +194,11 @@ impl McpServer {
                     .get("arguments")
                     .cloned()
                     .unwrap_or(Value::Object(Default::default()));
-                match (tool.handler)(args) {
+                match (tool.handler)(args).await {
                     Ok(result) => protocol::success_response(id, result),
-                    Err(e) => protocol::error_response(id.clone(), protocol::INTERNAL_ERROR, &e),
+                    Err(e) => {
+                        protocol::error_response(id.clone(), e.code, &e.message)
+                    }
                 }
             }
             None => protocol::error_response(

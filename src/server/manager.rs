@@ -75,9 +75,9 @@ impl From<ClientError> for ManagerError {
 }
 
 /// State for a running language server: the client and its file manager.
-struct ServerEntry {
-    client: LspClient,
-    file_manager: FileManager,
+pub(crate) struct ServerEntry {
+    pub client: LspClient,
+    pub file_manager: FileManager,
 }
 
 /// Manages language server lifecycle: lazy startup, lookup, and shutdown.

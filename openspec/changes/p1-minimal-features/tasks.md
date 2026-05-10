@@ -21,19 +21,19 @@
 
 ## 4. Idle Monitor
 
-- [ ] 4.1 Create `src/server/idle_monitor.rs` with `IdleMonitor` struct holding last-used timestamps, timeout, and check interval
-- [ ] 4.2 Implement `IdleMonitor::run` as a background tokio task that periodically checks for idle servers and shuts them down
-- [ ] 4.3 Implement `IdleMonitor::touch` to update last-used timestamp on each tool invocation
+- [x] 4.1 Create `src/server/idle_monitor.rs` with `IdleMonitor` struct holding last-used timestamps, timeout, and check interval
+- [x] 4.2 Implement `IdleMonitor::run` as a background tokio task that periodically checks for idle servers and shuts them down
+- [x] 4.3 Implement `IdleMonitor::touch` to update last-used timestamp on each tool invocation
 
 ## 5. MCP Tools
 
-- [ ] 5.1 Define tool schemas for `find_references`, `goto_definition`, `find_implementations` with parameters (`file_path`, `line`, `column`, optional `json`)
-- [ ] 5.2 Implement `find_references` handler — resolve file, ensure open, send `textDocument/references`, format output
-- [ ] 5.3 Implement `goto_definition` handler — resolve file, ensure open, send `textDocument/definition`, format output
-- [ ] 5.4 Implement `find_implementations` handler — resolve file, ensure open, send `textDocument/implementation`, format output
-- [ ] 5.5 Implement human-readable output formatting (spec §6.5: `file:line:col  line_text` with summary)
-- [ ] 5.6 Implement JSON output formatting (`json: true` parameter)
-- [ ] 5.7 Implement error handling — invalid path, unsupported language, server errors
+- [x] 5.1 Define tool schemas for `find_references`, `goto_definition`, `find_implementations` with parameters (`file_path`, `line`, `column`, optional `json`)
+- [x] 5.2 Implement `find_references` handler — resolve file, ensure open, send `textDocument/references`, format output
+- [x] 5.3 Implement `goto_definition` handler — resolve file, ensure open, send `textDocument/definition`, format output
+- [x] 5.4 Implement `find_implementations` handler — resolve file, ensure open, send `textDocument/implementation`, format output
+- [x] 5.5 Implement human-readable output formatting (spec §6.5: `file:line:col  line_text` with summary)
+- [x] 5.6 Implement JSON output formatting (`json: true` parameter)
+- [x] 5.7 Implement error handling — invalid path, unsupported language, server errors
 
 ## 6. Wiring
 
