@@ -2,6 +2,8 @@
 
 P0 built the foundational layers: `LspTransport` (JSON-RPC 2.0 over stdio to child processes), LSP types, and an `McpServer` skeleton that handles `initialize` and `tools/list` with an empty tool registry. The server compiles and responds to MCP requests but has no functional tools.
 
+During P1 testing, a framing bug was discovered in `src/mcp/protocol.rs`: the MCP stdio layer was using `Content-Length` header framing (which is correct for LSP but not for MCP). Claude Code's MCP client sends newline-delimited JSON with no headers. Fixed by replacing the header-parsing loop with a single `read_line` call and replacing the `Content-Length` write with a `body + "\n"` write.
+
 P1 fills in the middle and lower layers: an `LspClient` that manages the LSP lifecycle on top of `LspTransport`, a `LanguageServerManager` that lazily starts rust-analyzer, and three concrete MCP tools (`find_references`, `goto_definition`, `find_implementations`).
 
 The design follows the layered architecture from `doc/spec-2026-05-10.md` sections 4–6.
@@ -12,7 +14,7 @@ The design follows the layered architecture from `doc/spec-2026-05-10.md` sectio
 - Implement `LspClient` that can start a language server (`initialize` + `initialized`), manage open files, run queries, and shut down cleanly
 - Implement `FileManager` that sends `textDocument/didOpen`/`didChange`/`didClose` with version tracking and mtime checks
 - Implement `LanguageServerManager` with lazy startup (start on first tool invocation, wait for readiness)
-- Implement `IdleMonitor` that shuts down idle servers after a configurable timeout (default 300s)
+- Implement `IdleMonitor` that shuts down idle servers after a configurable timeout (default 600s)
 - Register three MCP tools that dispatch to `LspClient` query methods
 - Output human-readable text by default (spec §6.5), with optional `json: true` for structured output
 - Index readiness wait via `textDocument/documentSymbol` polling (spec §11.1)

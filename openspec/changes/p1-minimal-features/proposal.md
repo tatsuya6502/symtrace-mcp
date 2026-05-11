@@ -19,11 +19,11 @@ P0 established the MCP server framework and LSP transport layer, but the server 
 - `tools-definitions`: MCP tool schemas and dispatch for `find_references`, `goto_definition`, `find_implementations`
 
 ### Modified Capabilities
-_(none — P0 capabilities remain unchanged)_
+- `mcp-server` (P0): Fix stdio framing — MCP stdio uses newline-delimited JSON, not Content-Length headers (which are LSP-specific)
 
 ## Impact
 
 - **New modules**: `src/lsp/client.rs`, `src/lsp/file_manager.rs`, `src/server/manager.rs`, `src/server/idle_monitor.rs`, `src/language/rust.rs`
-- **Modified modules**: `src/mcp/tools.rs` (register real tools), `src/main.rs` (wire up server manager)
+- **Modified modules**: `src/mcp/tools.rs` (register real tools), `src/main.rs` (wire up server manager), `src/mcp/protocol.rs` (fix stdio framing)
 - **Dependencies**: No new crate dependencies — uses only tokio, serde, serde_json from P0
 - **Single language**: rust-analyzer only. TypeScript and Python support deferred to P3
