@@ -4,6 +4,26 @@
 
 A Rust MCP (Model Context Protocol) server that provides LSP-powered code intelligence to AI coding agents. It manages language server processes on behalf of AI tools, exposing operations like find-references, goto-definition, and call-hierarchy traversal as MCP tools over stdio.
 
+It is designed to complement, not replace, existing code analysis tools like `ast-outline`.
+
+## When to Use symtrace-mcp vs ast-outline
+
+`ast-outline` covers most code exploration needs and should be the first tool you reach for. `symtrace-mcp` handles the operations that require a live language server:
+
+| Task | Tool |
+|------|------|
+| Structure overview, signatures, symbol bodies | `ast-outline outline` / `show` |
+| Implementation search (tree-sitter) | `ast-outline implements` |
+| File-level dependency graph | `ast-outline deps` / `reverse-deps` |
+| Semantic and BM25 search | `ast-outline search` |
+| **Symbol-level reference search** | **`symtrace-mcp find_references`** |
+| **Rust trait implementation resolution** | **`symtrace-mcp find_implementations`** |
+| **Jump to definition (type-resolved)** | **`symtrace-mcp goto_definition`** |
+| **Call hierarchy** | **`symtrace-mcp incoming_calls`** *(Planned P2)* |
+| **Type information / hover** | **`symtrace-mcp hover`** *(Planned P4)* |
+
+The first tool call to `symtrace-mcp` starts the language server in the background. Subsequent calls reuse the running server. The server shuts down automatically after 10 minutes of inactivity.
+
 ## Architecture
 
 ```text
@@ -68,14 +88,29 @@ Language support is configured per-project. Adding a new language requires only 
 | **P3: Multi-language** | TypeScript and Python support; configuration file (`.symtrace.toml`) |
 | **P4: Advanced Features** | `hover`, `diagnostics`, `rename` |
 
-## Build & Run
+## Installation
+
+If you analyze Rust projects, you need to install `rust-analyzer` and ensure it's in your `PATH`.
 
 ```bash
-cargo build
-cargo run
+rustup component add rust-analyzer
+rustup component add rust-src
 ```
 
-The server reads JSON-RPC 2.0 messages with `Content-Length` framing from stdin and writes responses to stdout.
+Clone the repository and install the server:
+
+```bash
+cargo install --path .
+```
+
+Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
+
+```bash
+## Claude Code
+claude mcp add --scope user symtrace-mcp -- symtrace-mcp
+```
+
+The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes responses to stdout.
 
 ## License
 
