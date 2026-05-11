@@ -1,11 +1,9 @@
-//! JSON-RPC 2.0 message types and Content-Length framing for MCP.
+//! JSON-RPC 2.0 message types and newline-delimited framing for MCP stdio.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io;
-use tokio::io::{
-    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
-};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 // --- JSON-RPC 2.0 message types ---
 
@@ -82,59 +80,36 @@ pub fn error_response(id: Value, code: i64, message: &str) -> Value {
     })
 }
 
-// --- Content-Length framing ---
+// --- Newline-delimited framing ---
 
-/// Write a JSON-RPC message with `Content-Length` framing.
+/// Write a JSON-RPC message as a single newline-terminated JSON line.
 pub async fn write_message<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &Value,
 ) -> io::Result<()> {
-    let body = serde_json::to_string(message).expect("serialization should not fail");
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
-    writer.write_all(header.as_bytes()).await?;
+    let mut body = serde_json::to_string(message).expect("serialization should not fail");
+    body.push('\n');
     writer.write_all(body.as_bytes()).await?;
     writer.flush().await?;
     Ok(())
 }
 
-/// Read a JSON-RPC message with `Content-Length` framing.
-pub async fn read_message<R: AsyncBufRead + AsyncRead + Unpin>(
+const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
+
+/// Read a JSON-RPC message from a single newline-terminated JSON line.
+pub async fn read_message<R: AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> io::Result<Value> {
-    let mut content_length: Option<usize> = None;
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF"));
-        }
-        let line = line.trim();
-        if line.is_empty() {
-            break;
-        }
-        if let Some(rest) = line.strip_prefix("Content-Length:") {
-            content_length = Some(
-                rest.trim()
-                    .parse::<usize>()
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-            );
-        }
+    let mut buf = Vec::new();
+    let n = reader.read_until(b'\n', &mut buf).await?;
+    if n == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF"));
     }
-
-    let length = content_length.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length header")
-    })?;
-
-    const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
-    if length > MAX_BODY_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Content-Length {length} exceeds maximum {MAX_BODY_BYTES}"),
-        ));
+    if buf.len() > MAX_MESSAGE_BYTES {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"));
     }
-
-    let mut buf = vec![0u8; length];
-    reader.read_exact(&mut buf).await?;
-    let body = String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    serde_json::from_str(&body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    if buf.last() == Some(&b'\n') { buf.pop(); }
+    if buf.last() == Some(&b'\r') { buf.pop(); }
+    serde_json::from_slice(&buf)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
