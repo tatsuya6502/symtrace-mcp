@@ -21,21 +21,21 @@
 
 ## 4. Refactor LanguageServerManager
 
-- [ ] 4.1 Move `IdleMonitor` ownership from `McpServer` into `LanguageServerManager` (each manager creates and owns its own monitor)
-- [ ] 4.2 Add `LanguageServerManager::start_idle_monitor()` that spawns the background task and returns `JoinHandle`
-- [ ] 4.3 Ensure `LanguageServerManager::new()` accepts `root: PathBuf` and `configs: HashMap<Language, LanguageServerConfig>` (already does — verify)
+- [x] 4.1 Move `IdleMonitor` ownership from `McpServer` into `LanguageServerManager` (each manager creates and owns its own monitor)
+- [x] 4.2 Add `LanguageServerManager::start_idle_monitor()` that spawns the background task and returns `JoinHandle`
+- [x] 4.3 Ensure `LanguageServerManager::new()` accepts `root: PathBuf` and `configs: HashMap<Language, LanguageServerConfig>` (already does — verify)
 
 ## 5. Refactor McpServer
 
-- [ ] 5.1 Replace `Arc<LanguageServerManager>` and `Arc<IdleMonitor>` fields with `Arc<ProjectRegistry>`
-- [ ] 5.2 Update `McpServer::new()` to build `ProjectRegistry` from config instead of a single manager
-- [ ] 5.3 Update `tool_handler!` macro to capture `Arc<ProjectRegistry>` and call `registry.get_manager_for_file()` before delegating to the manager
-- [ ] 5.4 Update `McpServer::run()` to spawn idle monitors for all managers via `registry.managers()`
-- [ ] 5.5 Update graceful shutdown to iterate all managers in the registry
+- [x] 5.1 Replace `Arc<LanguageServerManager>` and `Arc<IdleMonitor>` fields with `Arc<ProjectRegistry>`
+- [x] 5.2 Update `McpServer::new()` to build `ProjectRegistry` from config instead of a single manager
+- [x] 5.3 Update `tool_handler!` macro to capture `Arc<ProjectRegistry>` and call `registry.get_manager_for_file()` before delegating to the manager
+- [x] 5.4 Update `McpServer::run()` to spawn idle monitors for all managers via `registry.managers()`
+- [x] 5.5 Update graceful shutdown to iterate all managers in the registry
 
 ## 6. Integration
 
-- [ ] 6.1 Update `main()` to attempt `.symtrace.toml` load at CWD, falling back to implicit config
+- [x] 6.1 Update `main()` to attempt `.symtrace.toml` load at CWD, falling back to implicit config
 - [ ] 6.2 Verify single-project backward compatibility: no `.symtrace.toml` → identical behavior to pre-change
 - [ ] 6.3 Manual test: create a monorepo with two Rust projects and `.symtrace.toml`, verify both get separate rust-analyzer instances via MCP tools
 - [ ] 6.4 Verify error message quality: file not in any project, invalid config, missing project root directory

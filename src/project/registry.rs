@@ -62,15 +62,12 @@ impl ProjectRegistry {
 
         let mut managers = HashMap::new();
         for root in &project_entries {
-            let manager = LanguageServerManager::with_configs(
-                root.clone(),
-                server_configs.clone(),
-            );
+            let manager = LanguageServerManager::with_configs(root.clone(), server_configs.clone());
             managers.insert(root.clone(), Arc::new(manager));
         }
 
         let mut sorted_roots: Vec<PathBuf> = managers.keys().cloned().collect();
-        sorted_roots.sort_by(|a, b| b.as_os_str().len().cmp(&a.as_os_str().len()));
+        sorted_roots.sort_by_key(|b| std::cmp::Reverse(b.as_os_str().len()));
 
         Ok(ProjectRegistry {
             managers: Arc::new(managers),
@@ -108,11 +105,11 @@ impl ProjectRegistry {
         let mut configs = default_server_configs();
 
         for (lang_name, cfg) in server_section {
-            if lang_name == "rust" {
-                if let Some(rust_cfg) = configs.get_mut(&Language::Rust) {
-                    rust_cfg.command = cfg.command.clone();
-                    rust_cfg.idle_timeout_secs = cfg.idle_timeout_secs;
-                }
+            if lang_name == "rust"
+                && let Some(rust_cfg) = configs.get_mut(&Language::Rust)
+            {
+                rust_cfg.command = cfg.command.clone();
+                rust_cfg.idle_timeout_secs = cfg.idle_timeout_secs;
             }
         }
 
@@ -188,7 +185,7 @@ mod tests {
 
         let manager_a = registry.get_manager_for_file(&file_in_a).unwrap();
 
-        assert!(manager as *const _ != manager_a as *const _);
+        assert!(!std::ptr::eq(manager, manager_a));
     }
 
     #[test]
