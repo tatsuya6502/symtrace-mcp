@@ -6,22 +6,34 @@ use crate::server::manager::{Language, LanguageServerConfig, LanguageServerManag
 
 #[derive(Debug)]
 pub enum RegistryError {
-    NoProjectForFile(PathBuf),
-    Canonicalization(std::io::Error),
+    NoProjectForFile {
+        path: PathBuf,
+        roots: Vec<PathBuf>,
+    },
+    Canonicalization {
+        root: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 impl std::fmt::Display for RegistryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RegistryError::NoProjectForFile(path) => {
+            RegistryError::NoProjectForFile { path, roots } => {
+                let roots: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
                 write!(
                     f,
-                    "file {:?} does not belong to any configured project",
-                    path
+                    "file {:?} does not belong to any configured project (roots: {})",
+                    path,
+                    roots.join(", ")
                 )
             }
-            RegistryError::Canonicalization(e) => {
-                write!(f, "path canonicalization failed: {e}")
+            RegistryError::Canonicalization { root, source } => {
+                write!(
+                    f,
+                    "project root {:?} does not exist or is not accessible: {source}",
+                    root
+                )
             }
         }
     }
@@ -30,8 +42,8 @@ impl std::fmt::Display for RegistryError {
 impl std::error::Error for RegistryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            RegistryError::Canonicalization(e) => Some(e),
-            RegistryError::NoProjectForFile(_) => None,
+            RegistryError::Canonicalization { source, .. } => Some(source),
+            RegistryError::NoProjectForFile { .. } => None,
         }
     }
 }
@@ -53,9 +65,12 @@ impl ProjectRegistry {
                 .projects
                 .iter()
                 .map(|p| {
-                    cwd.join(&p.root)
-                        .canonicalize()
-                        .map_err(RegistryError::Canonicalization)
+                    let full = cwd.join(&p.root);
+                    full.canonicalize()
+                        .map_err(|e| RegistryError::Canonicalization {
+                            root: p.root.clone(),
+                            source: e,
+                        })
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };
@@ -81,18 +96,27 @@ impl ProjectRegistry {
     ) -> Result<&Arc<LanguageServerManager>, RegistryError> {
         let canonical = path
             .canonicalize()
-            .map_err(RegistryError::Canonicalization)?;
+            .map_err(|e| RegistryError::Canonicalization {
+                root: path.to_path_buf(),
+                source: e,
+            })?;
 
         for root in &self.sorted_roots {
             if canonical.starts_with(root) {
                 return self
                     .managers
                     .get(root)
-                    .ok_or_else(|| RegistryError::NoProjectForFile(path.to_path_buf()));
+                    .ok_or_else(|| RegistryError::NoProjectForFile {
+                        path: path.to_path_buf(),
+                        roots: self.sorted_roots.clone(),
+                    });
             }
         }
 
-        Err(RegistryError::NoProjectForFile(path.to_path_buf()))
+        Err(RegistryError::NoProjectForFile {
+            path: path.to_path_buf(),
+            roots: self.sorted_roots.clone(),
+        })
     }
 
     pub fn managers(&self) -> impl Iterator<Item = &Arc<LanguageServerManager>> {

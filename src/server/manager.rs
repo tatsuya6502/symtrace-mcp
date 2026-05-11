@@ -93,7 +93,7 @@ pub struct LanguageServerManager {
     configs: HashMap<Language, LanguageServerConfig>,
     servers: Mutex<HashMap<Language, ServerEntry>>,
     root: PathBuf,
-    monitor: IdleMonitor,
+    monitor: Arc<IdleMonitor>,
 }
 
 impl LanguageServerManager {
@@ -107,16 +107,16 @@ impl LanguageServerManager {
             configs,
             servers: Mutex::new(HashMap::new()),
             root,
-            monitor: IdleMonitor::new(),
+            monitor: Arc::new(IdleMonitor::new()),
         }
     }
 
-    pub fn monitor(&self) -> &IdleMonitor {
+    pub fn monitor(&self) -> &Arc<IdleMonitor> {
         &self.monitor
     }
 
     pub fn start_idle_monitor(self: Arc<Self>) -> JoinHandle<()> {
-        let monitor = Arc::new(IdleMonitor::new());
+        let monitor = self.monitor.clone();
         let manager = self.clone();
         tokio::spawn(async move { monitor.run(manager).await })
     }
