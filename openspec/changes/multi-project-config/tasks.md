@@ -1,23 +1,23 @@
 ## 1. Config module
 
-- [ ] 1.1 Add `toml` dependency to `Cargo.toml`
-- [ ] 1.2 Create `src/config.rs` with `SymtraceConfig`, `ServerConfig`, and `ProjectEntry` structs (serde Deserialize)
-- [ ] 1.3 Implement `SymtraceConfig::load(path)` that reads and parses `.symtrace.toml`
-- [ ] 1.4 Implement `SymtraceConfig::implicit(cwd)` that generates the default single-project config
-- [ ] 1.5 Add unit tests for config parsing: valid multi-project, valid server-only, invalid TOML, missing file
+- [x] 1.1 Add `toml` dependency to `Cargo.toml`
+- [x] 1.2 Create `src/config.rs` with `SymtraceConfig`, `ServerConfig`, and `ProjectEntry` structs (serde Deserialize)
+- [x] 1.3 Implement `SymtraceConfig::load(path)` that reads and parses `.symtrace.toml`
+- [x] 1.4 Implement `SymtraceConfig::implicit(cwd)` that generates the default single-project config
+- [x] 1.5 Add unit tests for config parsing: valid multi-project, valid server-only, invalid TOML, missing file
 
 ## 2. ProjectRegistry
 
-- [ ] 2.1 Create `src/project/registry.rs` with `ProjectRegistry` struct containing `Arc<HashMap<PathBuf, Arc<LanguageServerManager>>>` and `sorted_roots: Vec<PathBuf>`
-- [ ] 2.2 Implement `ProjectRegistry::new(config, cwd)` that builds managers from config entries, canonicalizes paths, and sorts roots by length descending
-- [ ] 2.3 Implement `ProjectRegistry::get_manager_for_file(&self, path: &Path) -> Result<&Arc<LanguageServerManager>>` with longest-prefix-match
-- [ ] 2.4 Implement `ProjectRegistry::managers()` iterator for lifecycle operations (idle monitor spawning, shutdown)
-- [ ] 2.5 Add unit tests for longest-prefix-match: single match, nested roots, no match
+- [x] 2.1 Create `src/project/registry.rs` with `ProjectRegistry` struct containing `Arc<HashMap<PathBuf, Arc<LanguageServerManager>>>` and `sorted_roots: Vec<PathBuf>`
+- [x] 2.2 Implement `ProjectRegistry::new(config, cwd)` that builds managers from config entries, canonicalizes paths, and sorts roots by length descending
+- [x] 2.3 Implement `ProjectRegistry::get_manager_for_file(&self, path: &Path) -> Result<&Arc<LanguageServerManager>>` with longest-prefix-match
+- [x] 2.4 Implement `ProjectRegistry::managers()` iterator for lifecycle operations (idle monitor spawning, shutdown)
+- [x] 2.5 Add unit tests for longest-prefix-match: single match, nested roots, no match
 
 ## 3. Module structure
 
-- [ ] 3.1 Create `src/project.rs` module file (not `mod.rs`) with `pub mod registry`
-- [ ] 3.2 Wire `config` and `project` modules in `src/main.rs`
+- [x] 3.1 Create `src/project.rs` module file (not `mod.rs`) with `pub mod registry`
+- [x] 3.2 Wire `config` and `project` modules in `src/main.rs`
 
 ## 4. Refactor LanguageServerManager
 

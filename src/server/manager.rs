@@ -13,6 +13,7 @@ pub enum Language {
 }
 
 /// Configuration for a single language server.
+#[derive(Clone)]
 pub struct LanguageServerConfig {
     pub language: Language,
     pub command: String,
@@ -93,8 +94,15 @@ pub struct LanguageServerManager {
 
 impl LanguageServerManager {
     pub fn new(root: PathBuf) -> Self {
+        Self::with_configs(root, default_configs())
+    }
+
+    pub fn with_configs(
+        root: PathBuf,
+        configs: HashMap<Language, LanguageServerConfig>,
+    ) -> Self {
         Self {
-            configs: default_configs(),
+            configs,
             servers: Mutex::new(HashMap::new()),
             root,
         }

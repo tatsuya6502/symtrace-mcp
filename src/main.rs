@@ -1,6 +1,8 @@
+mod config;
 mod language;
 mod lsp;
 mod mcp;
+mod project;
 mod server;
 mod uri;
 
