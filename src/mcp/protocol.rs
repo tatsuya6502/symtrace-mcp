@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 // --- JSON-RPC 2.0 message types ---
 
@@ -94,15 +94,22 @@ pub async fn write_message<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
+const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
+
 /// Read a JSON-RPC message from a single newline-terminated JSON line.
-pub async fn read_message<R: AsyncBufRead + AsyncRead + Unpin>(
+pub async fn read_message<R: AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> io::Result<Value> {
-    let mut line = String::new();
-    let n = reader.read_line(&mut line).await?;
+    let mut buf = Vec::new();
+    let n = reader.read_until(b'\n', &mut buf).await?;
     if n == 0 {
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF"));
     }
-    serde_json::from_str(line.trim())
+    if buf.len() > MAX_MESSAGE_BYTES {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"));
+    }
+    if buf.last() == Some(&b'\n') { buf.pop(); }
+    if buf.last() == Some(&b'\r') { buf.pop(); }
+    serde_json::from_slice(&buf)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
