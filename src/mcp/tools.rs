@@ -119,66 +119,71 @@ impl McpServer {
             .map(|manager| manager.clone().start_idle_monitor())
             .collect();
 
-        let mut reader = BufReader::new(stdin());
-        let mut writer = stdout();
+        let result = async {
+            let mut reader = BufReader::new(stdin());
+            let mut writer = stdout();
 
-        loop {
-            let message = match protocol::read_message(&mut reader).await {
-                Ok(msg) => msg,
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                        break;
+            loop {
+                let message = match protocol::read_message(&mut reader).await {
+                    Ok(msg) => msg,
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                            break;
+                        }
+                        let response = protocol::error_response(
+                            Value::Null,
+                            protocol::PARSE_ERROR,
+                            &e.to_string(),
+                        );
+                        protocol::write_message(&mut writer, &response).await?;
+                        continue;
                     }
-                    let response = protocol::error_response(
-                        Value::Null,
-                        protocol::PARSE_ERROR,
-                        &e.to_string(),
-                    );
-                    protocol::write_message(&mut writer, &response).await?;
+                };
+
+                let id_opt = message.get("id").cloned();
+                let is_notification = id_opt.is_none();
+                let id = id_opt.unwrap_or(Value::Null);
+                let method = message.get("method").and_then(|m| m.as_str());
+                let params = message.get("params").cloned();
+
+                let Some(method) = method else {
+                    if !is_notification {
+                        let response = protocol::error_response(
+                            id,
+                            protocol::INVALID_REQUEST,
+                            "missing method field",
+                        );
+                        protocol::write_message(&mut writer, &response).await?;
+                    }
                     continue;
-                }
-            };
+                };
 
-            let id_opt = message.get("id").cloned();
-            let is_notification = id_opt.is_none();
-            let id = id_opt.unwrap_or(Value::Null);
-            let method = message.get("method").and_then(|m| m.as_str());
-            let params = message.get("params").cloned();
-
-            let Some(method) = method else {
-                if !is_notification {
-                    let response = protocol::error_response(
+                let response = match method {
+                    "initialize" if !is_notification => self.handle_initialize(&id, &params),
+                    "initialize" => None,
+                    "notifications/initialized" => None,
+                    "tools/list" if !is_notification => Some(self.handle_tools_list(&id)),
+                    "tools/list" => None,
+                    "tools/call" if !is_notification => {
+                        Some(self.handle_tools_call(&id, &params).await)
+                    }
+                    "tools/call" => None,
+                    _ if is_notification => None,
+                    _ => Some(protocol::error_response(
                         id,
-                        protocol::INVALID_REQUEST,
-                        "missing method field",
-                    );
+                        protocol::METHOD_NOT_FOUND,
+                        &format!("unknown method: {method}"),
+                    )),
+                };
+
+                if let Some(response) = response {
                     protocol::write_message(&mut writer, &response).await?;
                 }
-                continue;
-            };
-
-            let response = match method {
-                "initialize" if !is_notification => self.handle_initialize(&id, &params),
-                "initialize" => None,
-                "notifications/initialized" => None,
-                "tools/list" if !is_notification => Some(self.handle_tools_list(&id)),
-                "tools/list" => None,
-                "tools/call" if !is_notification => {
-                    Some(self.handle_tools_call(&id, &params).await)
-                }
-                "tools/call" => None,
-                _ if is_notification => None,
-                _ => Some(protocol::error_response(
-                    id,
-                    protocol::METHOD_NOT_FOUND,
-                    &format!("unknown method: {method}"),
-                )),
-            };
-
-            if let Some(response) = response {
-                protocol::write_message(&mut writer, &response).await?;
             }
+
+            Ok(())
         }
+        .await;
 
         // Graceful shutdown: stop all monitors and shut down all servers.
         for handle in monitor_handles {
@@ -188,7 +193,7 @@ impl McpServer {
             manager.shutdown_all().await;
         }
 
-        Ok(())
+        result
     }
 
     fn handle_initialize(&self, id: &Value, _params: &Option<Value>) -> Option<Value> {

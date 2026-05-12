@@ -15,13 +15,15 @@ async fn main() {
     let cwd = std::env::current_dir().expect("failed to determine current directory");
     let config_path = cwd.join(".symtrace.toml");
 
-    let config = if config_path.exists() {
-        SymtraceConfig::load(&config_path).unwrap_or_else(|e| {
-            eprintln!("error parsing {}: {e}", config_path.display());
+    let config = match SymtraceConfig::load(&config_path) {
+        Ok(config) => config,
+        Err(config::ConfigError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            SymtraceConfig::implicit(&cwd)
+        }
+        Err(e) => {
+            eprintln!("error loading {}: {e}", config_path.display());
             std::process::exit(1);
-        })
-    } else {
-        SymtraceConfig::implicit(&cwd)
+        }
     };
 
     let registry = ProjectRegistry::new(&config, &cwd).unwrap_or_else(|e| {

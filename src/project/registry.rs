@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -53,13 +54,17 @@ pub struct ProjectRegistry {
     sorted_roots: Vec<PathBuf>,
 }
 
-use std::collections::HashMap;
-
 impl ProjectRegistry {
     pub fn new(config: &SymtraceConfig, cwd: &Path) -> Result<Self, RegistryError> {
         let server_configs = Self::build_server_configs(&config.server);
         let project_entries = if config.projects.is_empty() {
-            vec![cwd.to_path_buf()]
+            vec![
+                cwd.canonicalize()
+                    .map_err(|e| RegistryError::Canonicalization {
+                        root: cwd.to_path_buf(),
+                        source: e,
+                    })?,
+            ]
         } else {
             config
                 .projects
@@ -103,13 +108,10 @@ impl ProjectRegistry {
 
         for root in &self.sorted_roots {
             if canonical.starts_with(root) {
-                return self
+                return Ok(self
                     .managers
                     .get(root)
-                    .ok_or_else(|| RegistryError::NoProjectForFile {
-                        path: path.to_path_buf(),
-                        roots: self.sorted_roots.clone(),
-                    });
+                    .expect("sorted_roots derived from managers keys"));
             }
         }
 
@@ -209,7 +211,7 @@ mod tests {
 
         let manager_a = registry.get_manager_for_file(&file_in_a).unwrap();
 
-        assert!(!std::ptr::eq(manager, manager_a));
+        assert!(!Arc::ptr_eq(manager, manager_a));
     }
 
     #[test]

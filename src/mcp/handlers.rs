@@ -186,8 +186,9 @@ fn format_text(locations: &[Location], no_results_msg: &str) -> String {
 
     let mut result = format!("{} results:\n", locations.len());
     let mut line_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let last_idx = locations.len() - 1;
 
-    for loc in locations {
+    for (i, loc) in locations.iter().enumerate() {
         let path = uri_to_path(&loc.uri);
 
         let line_text = read_line_text(&mut line_cache, &path, loc.range.start.line as usize);
@@ -198,7 +199,7 @@ fn format_text(locations: &[Location], no_results_msg: &str) -> String {
             loc.range.start.character + 1,
             line_text.trim_end()
         ));
-        if !std::ptr::eq(loc, locations.last().unwrap()) {
+        if i != last_idx {
             result.push('\n');
         }
     }
@@ -252,12 +253,18 @@ impl ToolParams {
             .and_then(|v| v.as_u64())
             .ok_or_else(|| ToolError::invalid_params("missing or invalid line"))?
             as u32;
+        if line == 0 {
+            return Err(ToolError::invalid_params("line must be >= 1"));
+        }
 
         let column = value
             .get("column")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| ToolError::invalid_params("missing or invalid column"))?
             as u32;
+        if column == 0 {
+            return Err(ToolError::invalid_params("column must be >= 1"));
+        }
 
         let json = value.get("json").and_then(|v| v.as_bool()).unwrap_or(false);
 
