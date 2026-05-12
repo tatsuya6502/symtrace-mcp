@@ -97,19 +97,23 @@ pub async fn write_message<W: AsyncWrite + Unpin>(
 const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024; // 8 MiB
 
 /// Read a JSON-RPC message from a single newline-terminated JSON line.
-pub async fn read_message<R: AsyncBufRead + Unpin>(
-    reader: &mut R,
-) -> io::Result<Value> {
+pub async fn read_message<R: AsyncBufRead + Unpin>(reader: &mut R) -> io::Result<Value> {
     let mut buf = Vec::new();
     let n = reader.read_until(b'\n', &mut buf).await?;
     if n == 0 {
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF"));
     }
     if buf.len() > MAX_MESSAGE_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "message too large",
+        ));
     }
-    if buf.last() == Some(&b'\n') { buf.pop(); }
-    if buf.last() == Some(&b'\r') { buf.pop(); }
-    serde_json::from_slice(&buf)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    if buf.last() == Some(&b'\n') {
+        buf.pop();
+    }
+    if buf.last() == Some(&b'\r') {
+        buf.pop();
+    }
+    serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }

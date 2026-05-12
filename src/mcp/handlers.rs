@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use super::tools::ToolError;
 use crate::lsp::types::{Location, Position};
-use crate::server::idle_monitor::IdleMonitor;
-use crate::server::manager::{LanguageServerManager, ManagerError};
+use crate::project::registry::ProjectRegistry;
+use crate::server::manager::ManagerError;
 use crate::uri::uri_to_path;
 
 // ---------------------------------------------------------------------------
@@ -59,27 +59,24 @@ fn query_schema(_description: &str) -> Value {
 // ---------------------------------------------------------------------------
 
 pub async fn find_references(
-    manager: &Arc<LanguageServerManager>,
-    monitor: &Arc<IdleMonitor>,
+    registry: &Arc<ProjectRegistry>,
     params: Value,
 ) -> Result<Value, ToolError> {
-    execute_query(manager, monitor, params, QueryKind::References).await
+    execute_query(registry, params, QueryKind::References).await
 }
 
 pub async fn goto_definition(
-    manager: &Arc<LanguageServerManager>,
-    monitor: &Arc<IdleMonitor>,
+    registry: &Arc<ProjectRegistry>,
     params: Value,
 ) -> Result<Value, ToolError> {
-    execute_query(manager, monitor, params, QueryKind::Definition).await
+    execute_query(registry, params, QueryKind::Definition).await
 }
 
 pub async fn find_implementations(
-    manager: &Arc<LanguageServerManager>,
-    monitor: &Arc<IdleMonitor>,
+    registry: &Arc<ProjectRegistry>,
     params: Value,
 ) -> Result<Value, ToolError> {
-    execute_query(manager, monitor, params, QueryKind::Implementations).await
+    execute_query(registry, params, QueryKind::Implementations).await
 }
 
 // ---------------------------------------------------------------------------
@@ -94,8 +91,7 @@ enum QueryKind {
 }
 
 async fn execute_query(
-    manager: &Arc<LanguageServerManager>,
-    monitor: &Arc<IdleMonitor>,
+    registry: &Arc<ProjectRegistry>,
     params: Value,
     kind: QueryKind,
 ) -> Result<Value, ToolError> {
@@ -119,6 +115,11 @@ async fn execute_query(
         )));
     }
 
+    // Route to the correct project manager.
+    let manager = registry
+        .get_manager_for_file(path)
+        .map_err(|e| ToolError::invalid_params(e.to_string()))?;
+
     // Resolve language and get (or lazily start) the server.
     let (language, mut servers) = manager
         .get_client_for_file(path)
@@ -131,7 +132,7 @@ async fn execute_query(
         })?;
 
     // Record activity for idle monitor.
-    monitor.touch(language).await;
+    manager.monitor().touch(language).await;
 
     let entry = servers
         .get_mut(&language)
@@ -177,68 +178,60 @@ async fn execute_query(
     Ok(mcp_tool_result(text))
 }
 
-// ---------------------------------------------------------------------------
-// Output formatting (5.5 / 5.6)
-// ---------------------------------------------------------------------------
-
 /// Human-readable: `file:line:col  line_text` with summary line.
 fn format_text(locations: &[Location], no_results_msg: &str) -> String {
     if locations.is_empty() {
         return no_results_msg.to_string();
     }
 
-    let mut lines = Vec::with_capacity(locations.len() + 1);
-    let mut file_set = HashMap::<PathBuf, ()>::new();
-    let mut file_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let mut result = format!("{} results:\n", locations.len());
+    let mut line_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let last_idx = locations.len() - 1;
 
-    for loc in locations {
+    for (i, loc) in locations.iter().enumerate() {
         let path = uri_to_path(&loc.uri);
-        let line_num = loc.range.start.line as usize + 1;
-        let col = loc.range.start.character as usize + 1;
 
-        let line_text = read_line_text(&mut file_cache, &path, loc.range.start.line as usize);
-        lines.push(format!(
+        let line_text = read_line_text(&mut line_cache, &path, loc.range.start.line as usize);
+        result.push_str(&format!(
             "{}:{}:{}  {}",
             path.display(),
-            line_num,
-            col,
-            line_text
+            loc.range.start.line + 1,
+            loc.range.start.character + 1,
+            line_text.trim_end()
         ));
-        file_set.entry(path).or_insert(());
+        if i != last_idx {
+            result.push('\n');
+        }
     }
 
-    let n = lines.len();
-    let m = file_set.len();
-    lines.push(format!("({n} results in {m} files)"));
-
-    lines.join("\n")
+    result
 }
 
 /// JSON: array of `{ file_path, line, column, line_text }`.
 fn format_json(locations: &[Location]) -> String {
-    let mut file_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
-
-    let results: Vec<Value> = locations
+    let mut line_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let entries: Vec<Value> = locations
         .iter()
         .map(|loc| {
-            let path = uri_to_path(&loc.uri);
-            let line_text = read_line_text(&mut file_cache, &path, loc.range.start.line as usize);
+            let file_path = uri_to_path(&loc.uri).to_string_lossy().into_owned();
+
+            let line_text = read_line_text(
+                &mut line_cache,
+                Path::new(&file_path),
+                loc.range.start.line as usize,
+            );
 
             serde_json::json!({
-                "file_path": path.display().to_string(),
+                "file_path": file_path,
                 "line": loc.range.start.line + 1,
                 "column": loc.range.start.character + 1,
-                "line_text": line_text,
+                "line_text": line_text.trim_end()
             })
         })
         .collect();
 
-    serde_json::to_string_pretty(&results).unwrap_or_else(|e| format!("[] // error: {e}"))
+    serde_json::to_string(&serde_json::json!({ "results": entries })).unwrap()
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 struct ToolParams {
     file_path: String,
@@ -252,33 +245,30 @@ impl ToolParams {
         let file_path = value
             .get("file_path")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_params("missing or invalid 'file_path' parameter"))?
+            .ok_or_else(|| ToolError::invalid_params("missing or invalid file_path"))?
             .to_string();
 
         let line = value
             .get("line")
             .and_then(|v| v.as_u64())
-            .filter(|&n| n <= u32::MAX as u64)
-            .ok_or_else(|| ToolError::invalid_params("missing or invalid 'line' parameter"))?
+            .ok_or_else(|| ToolError::invalid_params("missing or invalid line"))?
             as u32;
+        if line == 0 {
+            return Err(ToolError::invalid_params("line must be >= 1"));
+        }
 
         let column = value
             .get("column")
             .and_then(|v| v.as_u64())
-            .filter(|&n| n <= u32::MAX as u64)
-            .ok_or_else(|| ToolError::invalid_params("missing or invalid 'column' parameter"))?
+            .ok_or_else(|| ToolError::invalid_params("missing or invalid column"))?
             as u32;
-
-        if line == 0 {
-            return Err(ToolError::invalid_params("'line' must be >= 1 (1-based)"));
-        }
         if column == 0 {
-            return Err(ToolError::invalid_params("'column' must be >= 1 (1-based)"));
+            return Err(ToolError::invalid_params("column must be >= 1"));
         }
 
         let json = value.get("json").and_then(|v| v.as_bool()).unwrap_or(false);
 
-        Ok(Self {
+        Ok(ToolParams {
             file_path,
             line,
             column,
@@ -293,14 +283,18 @@ fn read_line_text(
     path: &Path,
     line_idx: usize,
 ) -> String {
-    let lines = cache.entry(path.to_path_buf()).or_insert_with(|| {
-        std::fs::read_to_string(path)
-            .map(|s| s.lines().map(|l| l.to_string()).collect())
+    if !cache.contains_key(path) {
+        let lines = std::fs::read_to_string(path)
             .unwrap_or_default()
-    });
-    lines
-        .get(line_idx)
-        .map(|l| l.trim().to_string())
+            .lines()
+            .map(String::from)
+            .collect();
+        cache.insert(path.to_path_buf(), lines);
+    }
+    cache
+        .get(path)
+        .and_then(|lines| lines.get(line_idx))
+        .cloned()
         .unwrap_or_default()
 }
 

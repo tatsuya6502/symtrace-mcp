@@ -5,54 +5,42 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::time;
 
-use super::manager::{Language, LanguageServerManager};
+use super::manager::Language;
 
 const DEFAULT_CHECK_INTERVAL_SECS: u64 = 60;
 
 pub struct IdleMonitor {
     last_used: Mutex<HashMap<Language, Instant>>,
-    manager: Arc<LanguageServerManager>,
     check_interval: Duration,
 }
 
 impl IdleMonitor {
-    pub fn new(manager: Arc<LanguageServerManager>) -> Self {
+    pub fn new() -> Self {
         Self {
             last_used: Mutex::new(HashMap::new()),
-            manager,
             check_interval: Duration::from_secs(DEFAULT_CHECK_INTERVAL_SECS),
         }
     }
 
-    #[allow(dead_code)]
-    pub fn with_check_interval(mut self, interval: Duration) -> Self {
-        self.check_interval = interval;
-        self
-    }
-
-    /// Update the last-used timestamp for a language (called on each tool invocation).
     pub async fn touch(&self, language: Language) {
         let mut last_used = self.last_used.lock().await;
         last_used.insert(language, Instant::now());
     }
 
-    /// Run the idle monitor as a background task.
-    /// Periodically checks for idle servers and shuts them down.
-    pub async fn run(self: Arc<Self>) {
+    pub async fn run(self: Arc<Self>, manager: Arc<super::manager::LanguageServerManager>) {
         let mut interval = time::interval(self.check_interval);
         loop {
             interval.tick().await;
-            self.check_and_shutdown_idle().await;
+            self.check_and_shutdown_idle(&manager).await;
         }
     }
 
-    async fn check_and_shutdown_idle(&self) {
+    async fn check_and_shutdown_idle(&self, manager: &super::manager::LanguageServerManager) {
         let mut last_used = self.last_used.lock().await;
         let languages: Vec<Language> = last_used.keys().copied().collect();
 
         for language in languages {
-            let idle_timeout = self
-                .manager
+            let idle_timeout = manager
                 .config_for(language)
                 .map(|cfg| Duration::from_secs(cfg.idle_timeout_secs))
                 .unwrap_or(Duration::from_secs(300));
@@ -67,7 +55,7 @@ impl IdleMonitor {
                 last_used.remove(&language);
                 drop(last_used);
 
-                if let Err(e) = self.manager.stop_server(language).await {
+                if let Err(e) = manager.stop_server(language).await {
                     eprintln!("[idle-monitor] error shutting down {language:?}: {e}");
                 }
 

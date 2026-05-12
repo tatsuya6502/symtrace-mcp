@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
+use super::idle_monitor::IdleMonitor;
 use crate::lsp::client::{ClientError, LspClient};
 use crate::lsp::file_manager::FileManager;
 
@@ -13,6 +16,7 @@ pub enum Language {
 }
 
 /// Configuration for a single language server.
+#[derive(Clone)]
 pub struct LanguageServerConfig {
     pub language: Language,
     pub command: String,
@@ -89,15 +93,32 @@ pub struct LanguageServerManager {
     configs: HashMap<Language, LanguageServerConfig>,
     servers: Mutex<HashMap<Language, ServerEntry>>,
     root: PathBuf,
+    monitor: Arc<IdleMonitor>,
 }
 
 impl LanguageServerManager {
+    #[expect(dead_code)]
     pub fn new(root: PathBuf) -> Self {
+        Self::with_configs(root, default_configs())
+    }
+
+    pub fn with_configs(root: PathBuf, configs: HashMap<Language, LanguageServerConfig>) -> Self {
         Self {
-            configs: default_configs(),
+            configs,
             servers: Mutex::new(HashMap::new()),
             root,
+            monitor: Arc::new(IdleMonitor::new()),
         }
+    }
+
+    pub fn monitor(&self) -> &Arc<IdleMonitor> {
+        &self.monitor
+    }
+
+    pub fn start_idle_monitor(self: Arc<Self>) -> JoinHandle<()> {
+        let monitor = self.monitor.clone();
+        let manager = self.clone();
+        tokio::spawn(async move { monitor.run(manager).await })
     }
 
     /// Resolve a file path to its language, based on the file extension.

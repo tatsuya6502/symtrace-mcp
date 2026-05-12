@@ -1,6 +1,6 @@
 # symtrace-mcp
 
-> **CAUTION:** This project is in early development. The API and architecture are not stable. Expect breaking changes.
+> **CAUTION:** This project is in early development. Expect breaking changes.
 
 A Rust MCP (Model Context Protocol) server that provides LSP-powered code intelligence to AI coding agents. It manages language server processes on behalf of AI tools, exposing operations like find-references, goto-definition, and call-hierarchy traversal as MCP tools over stdio.
 
@@ -24,44 +24,6 @@ It is designed to complement, not replace, existing code analysis tools like `as
 
 The first tool call to `symtrace-mcp` starts the language server in the background. Subsequent calls reuse the running server. The server shuts down automatically after 10 minutes of inactivity.
 
-## Architecture
-
-```text
-AI Agent  ──── stdio (JSON-RPC 2.0) ──────┐
-                                          │
-                                    ┌──── ▼ ─────┐
-                                    │ MCP Server │   src/mcp/
-                                    │ (protocol, │
-                                    │ tools)     │
-                                    └──── ┬ ─────┘
-                                          │
-                                    ┌──── ▼ ─────┐
-                                    │  Server    │   src/server/
-                                    │ (lifecycle,│
-                                    │  dispatch) │
-                                    └──── ┬ ─────┘
-                                          │
-                              ┌────────── ▼ ──────────┐
-                              │    LSP Transport      │   src/lsp/
-                              │  (JSON-RPC 2.0 over   │
-                              │   stdio to child LS)  │
-                              └────────── ▲ ──────────┘
-                                          │
-                              ┌────────── ┴ ──────────┐
-                              │ Language Server       │
-                              │ (rust-analyzer, etc.) │
-                              └───────────────────────┘
-```
-
-The design follows a layered architecture:
-
-- **MCP Protocol** (`src/mcp/`) — JSON-RPC 2.0 over stdio. Handles `initialize`, `tools/list`, and `tools/call`, dispatching tool invocations to registered handlers.
-- **Server** (`src/server/`) — Manages language server lifecycle (lazy start, idle shutdown) and routes tool calls to the appropriate LSP operation via `LspClient`.
-- **LSP Transport** (`src/lsp/`) — Communicates with child language server processes using Content-Length–framed JSON-RPC 2.0. Routes responses by request ID via tokio oneshot channels.
-- **Language** (`src/language/`) — Language-specific configuration and server discovery. *(stub — P3)*
-
-JSON-RPC 2.0 is implemented from scratch using `serde_json::Value` — no external JSON-RPC or LSP type crates. This keeps the dependency tree minimal and gives full control over transport framing.
-
 ## Supported Languages
 
 symtrace-mcp communicates with language servers via the Language Server Protocol, so it can support any language with an LSP-compliant server.
@@ -74,9 +36,30 @@ symtrace-mcp communicates with language servers via the Language Server Protocol
 
 Language support is configured per-project. Adding a new language requires only a language server entry — no code changes needed (P3).
 
+## Multi-Project Support
+
+symtrace-mcp can manage multiple independent projects in a single repository, each with its own language server instance. Create a `.symtrace.toml` file in the directory where Claude Code is launched:
+
+```toml
+[server.rust]
+command = "rust-analyzer"
+
+[[projects]]
+root = "project-a"
+
+[[projects]]
+root = "project-b"
+```
+
+- `[[projects]]` — List of project root directories (relative to the config file). Each gets its own language server.
+- `[server.rust]` — Global language server configuration. Optional; defaults to `rust-analyzer` with a 600s idle timeout.
+- If `.symtrace.toml` is absent, the server runs in single-project mode using the current directory as the project root.
+
+Tool calls are automatically routed to the correct project's language server based on the file path (longest-prefix match).
+
 ## Current Status
 
-**P1 (Minimal Features)** — complete. Three MCP tools are available: `find_references`, `goto_definition`, and `find_implementations`. The server lazily starts rust-analyzer, manages open files with mtime tracking, and shuts down idle servers automatically.
+**P1 (Minimal Features)** — complete. Three MCP tools are available: `find_references`, `goto_definition`, and `find_implementations`. The server lazily starts rust-analyzer, manages open files with mtime tracking, and shuts down idle servers automatically. Multi-project support via `.symtrace.toml`.
 
 **P0 (Foundation)** — complete.
 
@@ -85,7 +68,7 @@ Language support is configured per-project. Adding a new language requires only 
 | Phase | Scope |
 |-------|-------|
 | **P2: Call Hierarchy** | `incoming_calls`, `outgoing_calls` via the callHierarchy protocol |
-| **P3: Multi-language** | TypeScript and Python support; configuration file (`.symtrace.toml`) |
+| **P3: Multi-language** | TypeScript and Python support |
 | **P4: Advanced Features** | `hover`, `diagnostics`, `rename` |
 
 ## Installation
