@@ -1,6 +1,7 @@
 # symtrace-mcp
 
-> **CAUTION:** This project is in early development. Expect breaking changes.
+> [!CAUTION]
+> This project is in early development. Expect breaking changes.
 
 A Rust MCP (Model Context Protocol) server that provides LSP-powered code intelligence to AI coding agents. It manages language server processes on behalf of AI tools, exposing operations like find-references, goto-definition, and call-hierarchy traversal as MCP tools over stdio.
 
@@ -8,7 +9,7 @@ It is designed to complement, not replace, existing code analysis tools like `as
 
 ## When to Use symtrace-mcp vs ast-outline
 
-`ast-outline` covers most code exploration needs and should be the first tool you reach for. `symtrace-mcp` handles the operations that require a live language server:
+[`ast-outline`][ast-outline] covers most code exploration needs and should be the first tool you reach for. `symtrace-mcp` handles the operations that require a live language server:
 
 | Task | Tool |
 |------|------|
@@ -23,6 +24,8 @@ It is designed to complement, not replace, existing code analysis tools like `as
 | **Type information / hover** | **`symtrace-mcp hover`** *(Planned P4)* |
 
 The first tool call to `symtrace-mcp` starts the language server in the background. Subsequent calls reuse the running server. The server shuts down automatically after 10 minutes of inactivity.
+
+[ast-outline]: https://github.com/aeroxy/ast-outline
 
 ## Supported Languages
 
