@@ -37,5 +37,5 @@
 
 - [x] 6.1 Update `main()` to attempt `.symtrace.toml` load at CWD, falling back to implicit config
 - [x] 6.2 Verify single-project backward compatibility: no `.symtrace.toml` → identical behavior to pre-change
-- [ ] 6.3 Manual test: create a monorepo with two Rust projects and `.symtrace.toml`, verify both get separate rust-analyzer instances via MCP tools
+- [x] 6.3 Manual test: create a monorepo with two Rust projects and `.symtrace.toml`, verify both get separate rust-analyzer instances via MCP tools
 - [x] 6.4 Verify error message quality: file not in any project, invalid config, missing project root directory
