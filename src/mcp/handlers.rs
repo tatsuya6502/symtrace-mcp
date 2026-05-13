@@ -395,14 +395,8 @@ fn format_call_hierarchy_text(
         serde_json::to_string(&serde_json::json!({ "results": entries })).unwrap()
     } else {
         let mut result = String::new();
-        let mut line_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
         for (item, _range) in items {
             let file_path = uri_to_path(&item.uri);
-            let line_text = read_line_text(
-                &mut line_cache,
-                &file_path,
-                item.selection_range.start.line as usize,
-            );
             result.push_str(&format!(
                 "  {} {}:{}:{}  {}()\n",
                 arrow,
