@@ -84,6 +84,7 @@ fn call_hierarchy_schema(_description: &str) -> Value {
             },
             "depth": {
                 "type": "integer",
+                "enum": [1],
                 "default": 1,
                 "description": "Call chain depth (currently only 1 is supported)"
             },
@@ -312,8 +313,12 @@ async fn execute_call_hierarchy(
         .map_err(|e| ToolError::internal(e.to_string()))?;
 
     if items.is_empty() {
-        let msg = "No callable symbol at this position";
-        return Ok(mcp_tool_result(msg.to_string()));
+        let text = if p.json {
+            serde_json::to_string(&serde_json::json!({ "results": [] })).unwrap()
+        } else {
+            "No callable symbol at this position".to_string()
+        };
+        return Ok(mcp_tool_result(text));
     }
 
     let item = &items[0];
@@ -369,7 +374,11 @@ fn format_call_hierarchy_text(
     json: bool,
 ) -> String {
     if items.is_empty() {
-        return no_results_msg.to_string();
+        return if json {
+            serde_json::to_string(&serde_json::json!({ "results": [] })).unwrap()
+        } else {
+            no_results_msg.to_string()
+        };
     }
 
     if json {
@@ -426,27 +435,24 @@ impl CallHierarchyParams {
             .ok_or_else(|| ToolError::invalid_params("missing or invalid file_path"))?
             .to_string();
 
-        let line = value
-            .get("line")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| ToolError::invalid_params("missing or invalid line"))?
-            as u32;
+        let line = parse_u32_field(value, "line")?;
         if line == 0 {
             return Err(ToolError::invalid_params("line must be >= 1"));
         }
 
-        let column = value
-            .get("column")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| ToolError::invalid_params("missing or invalid column"))?
-            as u32;
+        let column = parse_u32_field(value, "column")?;
         if column == 0 {
             return Err(ToolError::invalid_params("column must be >= 1"));
         }
 
         let json = value.get("json").and_then(|v| v.as_bool()).unwrap_or(false);
 
-        let depth = value.get("depth").and_then(|v| v.as_u64()).unwrap_or(1);
+        let depth = match value.get("depth") {
+            None => 1,
+            Some(v) => v
+                .as_u64()
+                .ok_or_else(|| ToolError::invalid_params("depth must be the integer 1"))?,
+        };
         if depth != 1 {
             return Err(ToolError::invalid_params("Only depth 1 is supported"));
         }
@@ -528,20 +534,12 @@ impl ToolParams {
             .ok_or_else(|| ToolError::invalid_params("missing or invalid file_path"))?
             .to_string();
 
-        let line = value
-            .get("line")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| ToolError::invalid_params("missing or invalid line"))?
-            as u32;
+        let line = parse_u32_field(value, "line")?;
         if line == 0 {
             return Err(ToolError::invalid_params("line must be >= 1"));
         }
 
-        let column = value
-            .get("column")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| ToolError::invalid_params("missing or invalid column"))?
-            as u32;
+        let column = parse_u32_field(value, "column")?;
         if column == 0 {
             return Err(ToolError::invalid_params("column must be >= 1"));
         }
@@ -576,6 +574,17 @@ fn read_line_text(
         .and_then(|lines| lines.get(line_idx))
         .cloned()
         .unwrap_or_default()
+}
+
+/// Parse a JSON integer field, rejecting values that don't fit in u32.
+fn parse_u32_field(value: &Value, field: &str) -> Result<u32, ToolError> {
+    let raw = value
+        .get(field)
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| ToolError::invalid_params(format!("missing or invalid {field}")))?;
+    u32::try_from(raw).map_err(|_| {
+        ToolError::invalid_params(format!("{field} value {raw} is out of range"))
+    })
 }
 
 /// Wrap text output in MCP `tools/call` result envelope.
