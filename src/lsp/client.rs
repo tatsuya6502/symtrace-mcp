@@ -33,7 +33,6 @@ pub struct LspClient {
     transport: LspTransport,
     root_uri: String,
     open_files: HashSet<String>,
-    #[allow(dead_code)]
     capabilities: ServerCapabilities,
 }
 
@@ -263,6 +262,90 @@ impl LspClient {
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
         Ok(parse_location_list(&result))
+    }
+
+    /// Check whether the language server supports the callHierarchy protocol.
+    fn call_hierarchy_supported(&self) -> bool {
+        self.capabilities.call_hierarchy_provider.is_some()
+    }
+
+    /// Send `textDocument/prepareCallHierarchy` and return prepared items.
+    pub async fn prepare_call_hierarchy(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::CallHierarchyItem>, ClientError> {
+        if !self.call_hierarchy_supported() {
+            return Err(ClientError::Protocol(
+                "language server does not support call hierarchy".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/prepareCallHierarchy",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        let items: Vec<super::types::CallHierarchyItem> = if result.is_null() {
+            Vec::new()
+        } else {
+            serde_json::from_value(result).unwrap_or_default()
+        };
+
+        Ok(items)
+    }
+
+    /// Send `callHierarchy/incomingCalls` and return callers.
+    pub async fn incoming_calls(
+        &self,
+        item: &super::types::CallHierarchyItem,
+    ) -> Result<Vec<super::types::CallHierarchyIncomingCall>, ClientError> {
+        let result = self
+            .transport
+            .send_request(
+                "callHierarchy/incomingCalls",
+                serde_json::json!({ "item": item }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        let calls: Vec<super::types::CallHierarchyIncomingCall> = if result.is_null() {
+            Vec::new()
+        } else {
+            serde_json::from_value(result).unwrap_or_default()
+        };
+
+        Ok(calls)
+    }
+
+    /// Send `callHierarchy/outgoingCalls` and return callees.
+    pub async fn outgoing_calls(
+        &self,
+        item: &super::types::CallHierarchyItem,
+    ) -> Result<Vec<super::types::CallHierarchyOutgoingCall>, ClientError> {
+        let result = self
+            .transport
+            .send_request(
+                "callHierarchy/outgoingCalls",
+                serde_json::json!({ "item": item }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        let calls: Vec<super::types::CallHierarchyOutgoingCall> = if result.is_null() {
+            Vec::new()
+        } else {
+            serde_json::from_value(result).unwrap_or_default()
+        };
+
+        Ok(calls)
     }
 
     /// Send `textDocument/documentSymbol` and return whether the server

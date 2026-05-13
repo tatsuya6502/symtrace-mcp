@@ -89,6 +89,18 @@ impl McpServer {
             handlers::find_implementations_schema(),
             tool_handler!(registry, handlers::find_implementations),
         );
+        server.register_tool(
+            "incoming_calls",
+            "Find callers (incoming calls) of the function or method at the given position.",
+            handlers::incoming_calls_schema(),
+            tool_handler!(registry, handlers::incoming_calls),
+        );
+        server.register_tool(
+            "outgoing_calls",
+            "Find callees (outgoing calls) from the function or method at the given position.",
+            handlers::outgoing_calls_schema(),
+            tool_handler!(registry, handlers::outgoing_calls),
+        );
 
         server
     }
