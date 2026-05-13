@@ -3,7 +3,9 @@
 > [!CAUTION]
 > このプロジェクトは初期開発段階です。破壊的変更が予想されます。
 
-AIコーディングエージェントにLSPベースのコードインテリジェンスを提供するRust製MCP（Model Context Protocol）サーバーです。AIツールに代わって言語サーバープロセスを管理し、find-references、goto-definition、call-hierarchyトラバーサルなどの操作をstdio経由のMCPツールとして公開します。
+AIコーディングエージェントとLanguage Server Protocolの橋渡しを行うMCP（Model Context Protocol）サーバーです。AIツールに代わって言語サーバープロセスを管理し、find-references、goto-definition、call-hierarchyトラバーサルなどの操作をstdio経由のMCPツールとして公開します。
+
+**遅延起動**と**自動アイドルシャットダウン**により、重い言語サーバープロセスはAIエージェントが深いコード解析を要求したときだけリソースを消費します。
 
 `ast-outline`などの既存のコード解析ツールを置き換えるものではなく、補完することを目的としています。
 
@@ -20,8 +22,8 @@ AIコーディングエージェントにLSPベースのコードインテリジ
 | **シンボルレベルの参照検索** | **`symtrace-mcp find_references`** |
 | **Rust トレイト実装の解決** | **`symtrace-mcp find_implementations`** |
 | **定義へのジャンプ（型解決付き）** | **`symtrace-mcp goto_definition`** |
-| **コール階層** | **`symtrace-mcp incoming_calls`** *(P2で計画中)* |
-| **型情報 / ホバー** | **`symtrace-mcp hover`** *(P4で計画中)* |
+| **コール階層** | **`symtrace-mcp incoming_calls`** / **`outgoing_calls`** |
+| **型情報 / ホバー** | **`symtrace-mcp hover`** *(計画中)* |
 
 `symtrace-mcp`への最初のツール呼び出しでバックグラウンドで言語サーバーが起動します。以降の呼び出しは稼働中のサーバーを再利用します。サーバーは10分間操作がないと自動的にシャットダウンします。
 
@@ -33,11 +35,11 @@ symtrace-mcpはLanguage Server Protocolを介して言語サーバーと通信�
 
 | 言語 | 言語サーバー | ステータス |
 |----------|----------------|--------|
-| Rust | [rust-analyzer](https://rust-analyzer.github.io/) | 対応済み（P1） |
+| Rust | [rust-analyzer](https://rust-analyzer.github.io/) | 対応済み |
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | 計画中 |
 | Python | [pyright](https://github.com/microsoft/pyright) | 計画中 |
 
-言語サポートはプロジェクトごとに設定します。新しい言語の追加には言語サーバーのエントリだけで済み、コードの変更は不要です（P3）。
+言語サポートはプロジェクトごとに設定します。新しい言語の追加には言語サーバーのエントリだけで済み、コードの変更は不要です。
 
 ## マルチプロジェクト対応
 
@@ -62,17 +64,18 @@ root = "project-b"
 
 ## 現在のステータス
 
-**P1（最小機能）** — 完了。`find_references`、`goto_definition`、`find_implementations`の3つのMCPツールが利用可能です。サーバーはrust-analyzerを遅延起動し、mtime追跡付きでオープンファイルを管理し、アイドル状態のサーバーを自動的にシャットダウンします。`.symtrace.toml`によるマルチプロジェクト対応も完了しています。
+**フェーズ 2（コール階層）** — 完了。`incoming_calls`（呼び出し元）と`outgoing_calls`（呼び出し先）の2つのMCPツールがcallHierarchyプロトコル経由で利用可能です。
 
-**P0（基盤）** — 完了。
+**フェーズ 1（最小機能）** — 完了。`find_references`、`goto_definition`、`find_implementations`の3つのMCPツールが利用可能です。サーバーはrust-analyzerを遅延起動し、mtime追跡付きでオープンファイルを管理し、アイドル状態のサーバーを自動的にシャットダウンします。`.symtrace.toml`によるマルチプロジェクト対応も完了しています。
+
+**フェーズ 0（基盤）** — 完了。
 
 **計画中のフェーズ：**
 
 | フェーズ | スコープ |
 |-------|-------|
-| **P2: コール階層** | callHierarchyプロトコルによる`incoming_calls`、`outgoing_calls` |
-| **P3: マルチ言語** | TypeScriptおよびPython対応 |
-| **P4: 高度な機能** | `hover`、`diagnostics`、`rename` |
+| **フェーズ 3: マルチ言語** | TypeScriptおよびPython対応 |
+| **フェーズ 4: 高度な機能** | `hover`、`diagnostics`、`rename` |
 
 ## インストール
 
