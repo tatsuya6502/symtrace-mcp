@@ -70,7 +70,7 @@ impl McpServer {
             registry: registry.clone(),
         };
 
-        // Register the three MCP tools (6.2).
+        // Register the five MCP tools.
         server.register_tool(
             "find_references",
             "Find all references to the symbol at the given position.",

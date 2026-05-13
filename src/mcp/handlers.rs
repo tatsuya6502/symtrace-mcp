@@ -409,7 +409,7 @@ fn format_call_hierarchy_text(
                 file_path.display(),
                 item.selection_range.start.line + 1,
                 item.selection_range.start.character + 1,
-                line_text.trim_end()
+                item.name,
             ));
         }
         result.push_str(&format!("({} {}s)", items.len(), label));

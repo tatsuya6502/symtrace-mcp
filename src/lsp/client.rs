@@ -296,7 +296,9 @@ impl LspClient {
         let items: Vec<super::types::CallHierarchyItem> = if result.is_null() {
             Vec::new()
         } else {
-            serde_json::from_value(result).unwrap_or_default()
+            serde_json::from_value(result).map_err(|e| {
+                ClientError::Protocol(format!("failed to parse CallHierarchyItem[]: {e}"))
+            })?
         };
 
         Ok(items)
@@ -319,7 +321,9 @@ impl LspClient {
         let calls: Vec<super::types::CallHierarchyIncomingCall> = if result.is_null() {
             Vec::new()
         } else {
-            serde_json::from_value(result).unwrap_or_default()
+            serde_json::from_value(result).map_err(|e| {
+                ClientError::Protocol(format!("failed to parse CallHierarchyIncomingCall[]: {e}"))
+            })?
         };
 
         Ok(calls)
@@ -342,7 +346,9 @@ impl LspClient {
         let calls: Vec<super::types::CallHierarchyOutgoingCall> = if result.is_null() {
             Vec::new()
         } else {
-            serde_json::from_value(result).unwrap_or_default()
+            serde_json::from_value(result).map_err(|e| {
+                ClientError::Protocol(format!("failed to parse CallHierarchyOutgoingCall[]: {e}"))
+            })?
         };
 
         Ok(calls)
