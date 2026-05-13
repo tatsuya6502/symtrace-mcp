@@ -3,7 +3,9 @@
 > [!CAUTION]
 > This project is in early development. Expect breaking changes.
 
-A Rust MCP (Model Context Protocol) server that provides LSP-powered code intelligence to AI coding agents. It manages language server processes on behalf of AI tools, exposing operations like find-references, goto-definition, and call-hierarchy traversal as MCP tools over stdio.
+An MCP (Model Context Protocol) server that acts as a bridge between AI coding agents and the Language Server Protocol. It manages language server processes on behalf of AI tools, exposing operations like find-references, goto-definition, and call-hierarchy traversal as MCP tools over stdio.
+
+**Lazy startup** and **automatic idle shutdown** ensure that heavy language server processes only consume resources when the AI agent specifically requests deep code analysis.
 
 It is designed to complement, not replace, existing code analysis tools like `ast-outline`.
 
@@ -20,8 +22,8 @@ It is designed to complement, not replace, existing code analysis tools like `as
 | **Symbol-level reference search** | **`symtrace-mcp find_references`** |
 | **Rust trait implementation resolution** | **`symtrace-mcp find_implementations`** |
 | **Jump to definition (type-resolved)** | **`symtrace-mcp goto_definition`** |
-| **Call hierarchy** | **`symtrace-mcp incoming_calls`** *(Planned P2)* |
-| **Type information / hover** | **`symtrace-mcp hover`** *(Planned P4)* |
+| **Call hierarchy** | **`symtrace-mcp incoming_calls`** / **`outgoing_calls`** |
+| **Type information / hover** | **`symtrace-mcp hover`** *(Planned)* |
 
 The first tool call to `symtrace-mcp` starts the language server in the background. Subsequent calls reuse the running server. The server shuts down automatically after 10 minutes of inactivity.
 
@@ -33,11 +35,11 @@ symtrace-mcp communicates with language servers via the Language Server Protocol
 
 | Language | Language Server | Status |
 |----------|----------------|--------|
-| Rust | [rust-analyzer](https://rust-analyzer.github.io/) | Supported (P1) |
+| Rust | [rust-analyzer](https://rust-analyzer.github.io/) | Supported |
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | Planned |
 | Python | [pyright](https://github.com/microsoft/pyright) | Planned |
 
-Language support is configured per-project. Adding a new language requires only a language server entry — no code changes needed (P3).
+Language support is configured per-project. Adding a new language requires only a language server entry — no code changes needed.
 
 ## Multi-Project Support
 
@@ -62,17 +64,18 @@ Tool calls are automatically routed to the correct project's language server bas
 
 ## Current Status
 
-**P1 (Minimal Features)** — complete. Three MCP tools are available: `find_references`, `goto_definition`, and `find_implementations`. The server lazily starts rust-analyzer, manages open files with mtime tracking, and shuts down idle servers automatically. Multi-project support via `.symtrace.toml`.
+**Phase 2 (Call Hierarchy)** — complete. Two MCP tools for call hierarchy traversal: `incoming_calls` (callers) and `outgoing_calls` (callees) via the callHierarchy protocol.
 
-**P0 (Foundation)** — complete.
+**Phase 1 (Minimal Features)** — complete. Three MCP tools are available: `find_references`, `goto_definition`, and `find_implementations`. The server lazily starts rust-analyzer, manages open files with mtime tracking, and shuts down idle servers automatically. Multi-project support via `.symtrace.toml`.
+
+**Phase 0 (Foundation)** — complete.
 
 **Planned phases:**
 
 | Phase | Scope |
 |-------|-------|
-| **P2: Call Hierarchy** | `incoming_calls`, `outgoing_calls` via the callHierarchy protocol |
-| **P3: Multi-language** | TypeScript and Python support |
-| **P4: Advanced Features** | `hover`, `diagnostics`, `rename` |
+| **Phase 3: Multi-language** | TypeScript and Python support |
+| **Phase 4: Advanced Features** | `hover`, `diagnostics`, `rename` |
 
 ## Installation
 

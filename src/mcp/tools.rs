@@ -70,7 +70,7 @@ impl McpServer {
             registry: registry.clone(),
         };
 
-        // Register the three MCP tools (6.2).
+        // Register the five MCP tools.
         server.register_tool(
             "find_references",
             "Find all references to the symbol at the given position.",
@@ -88,6 +88,18 @@ impl McpServer {
             "Find implementations of the trait or type at the given position.",
             handlers::find_implementations_schema(),
             tool_handler!(registry, handlers::find_implementations),
+        );
+        server.register_tool(
+            "incoming_calls",
+            "Find callers (incoming calls) of the function or method at the given position.",
+            handlers::incoming_calls_schema(),
+            tool_handler!(registry, handlers::incoming_calls),
+        );
+        server.register_tool(
+            "outgoing_calls",
+            "Find callees (outgoing calls) from the function or method at the given position.",
+            handlers::outgoing_calls_schema(),
+            tool_handler!(registry, handlers::outgoing_calls),
         );
 
         server
