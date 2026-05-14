@@ -23,11 +23,15 @@ The stats output SHALL include a "Tool Usage" section showing, for each tool: ca
 - **THEN** the "Tool Usage" section shows "(no data)"
 
 ### Requirement: Stats output format — top files
-The stats output SHALL include a "Top Files" section showing the top 10 files by tool call count, with call counts.
+The stats output SHALL include a "Top Files" section showing the top 10 files by tool call count, with call counts. File paths SHALL be displayed as relative paths from the project root (the directory containing `.symtrace/`).
 
 #### Scenario: Files with multiple calls
 - **WHEN** tool calls reference different files
-- **THEN** the output lists up to 10 files sorted by call count descending
+- **THEN** the output lists up to 10 files sorted by call count descending, with relative paths (e.g., `src/stats.rs` instead of `/full/path/src/stats.rs`)
+
+#### Scenario: File outside project root
+- **WHEN** a file path does not start with the project root prefix
+- **THEN** the full path is displayed as-is
 
 ### Requirement: Stats output format — language servers
 The stats output SHALL include a "Language Servers" section showing, for each language: number of startups, average startup duration, and total uptime.

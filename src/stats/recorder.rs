@@ -210,6 +210,13 @@ impl StatsRecorder {
                 .push((event, duration_ms, timestamp));
         }
 
+        let mut now_rows = conn.query("SELECT datetime('now')", ()).await?;
+        let now_secs = if let Some(row) = now_rows.next().await? {
+            ts_to_secs(&row.get::<String>(0)?).unwrap_or(0)
+        } else {
+            0
+        };
+
         let mut result = Vec::new();
         for (language, events) in events_by_lang {
             let startups = events.iter().filter(|(e, _, _)| e == "started").count() as i64;
@@ -238,6 +245,9 @@ impl StatsRecorder {
                     }
                     _ => {}
                 }
+            }
+            if let Some(start_ts) = last_start_ts {
+                total_uptime_secs += now_secs - start_ts;
             }
 
             result.push(ServerUsage {

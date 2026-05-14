@@ -14,7 +14,7 @@ pub async fn print_stats(project_root: &Path) {
 
     print_tool_usage(&recorder).await;
     println!();
-    print_top_files(&recorder).await;
+    print_top_files(&recorder, project_root).await;
     println!();
     print_server_usage(&recorder).await;
 }
@@ -35,13 +35,17 @@ async fn print_tool_usage(recorder: &StatsRecorder) {
     }
 }
 
-async fn print_top_files(recorder: &StatsRecorder) {
+async fn print_top_files(recorder: &StatsRecorder, project_root: &Path) {
     println!("Top Files:");
     match recorder.query_top_files().await {
         Ok(files) if files.is_empty() => println!("  (no data)"),
         Ok(files) => {
             for f in &files {
-                println!("  {:<40} {:>3} calls", f.file_path, f.calls);
+                let display_path = Path::new(&f.file_path)
+                    .strip_prefix(project_root)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| f.file_path.clone());
+                println!("  {:<40} {:>3} calls", display_path, f.calls);
             }
         }
         Err(e) => eprintln!("  error querying files: {e}"),

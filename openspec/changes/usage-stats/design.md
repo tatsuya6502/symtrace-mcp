@@ -56,6 +56,22 @@ symtrace-mcp is a single-process MCP server that manages language server instanc
 
 **Rationale**: Prevents unbounded growth. 30 days covers "last month" analysis while keeping the DB small (a few hundred KB even for heavy use).
 
+### 6. Relative paths in Top Files display
+
+**Choice**: Strip the project root prefix from file paths in the "Top Files" section, displaying relative paths (e.g., `src/stats.rs`).
+
+**Rationale**: Absolute paths are noisy and redundant — the user already knows which project they're in (CWD). Relative paths are more readable and consistent with how developers think about project structure. If a file falls outside the project root (unlikely but possible for generated/dependency files), the full path is shown as a fallback.
+
+### 7. Uptime tracking for unpaired server start events
+
+**Choice**: Treat unpaired `"started"` events as still-running — count uptime from the start timestamp to `now`.
+
+**Alternatives considered**:
+- **Heartbeat table**: Periodic writes (every ~1 min) to a heartbeat table; `stats` would detect stale heartbeats and retroactively insert `"stopped"` events. Rejected: adds periodic write overhead, makes `stats` (a read command) mutate the database, and introduces a new table and cleanup logic for a cosmetic edge case.
+- **Tool-call timestamps as implicit heartbeats**: Use the last tool call timestamp as a proxy for liveness. If an unpaired start's last tool call is older than the idle timeout, cap uptime at that point. No new writes needed, but deferred until the edge case proves bothersome in practice.
+
+**Rationale**: The graceful shutdown path (stdin EOF → `shutdown_all()` → `"stopped"` event) already records matched pairs. Unpaired starts only occur when symtrace-mcp is killed (SIGKILL/SIGTERM), causing "phantom uptime" that grows until the next session. This is cosmetic and self-correcting — the next `"started"` event resets pairing. Counting to `now` is the simplest correct behavior; if phantom uptime becomes annoying, the tool-call-timestamp approach is a lightweight follow-up.
+
 ## Risks / Trade-offs
 
 - **[Turso beta status]** → Acceptable for a toy project. If Turso becomes a problem, the schema is simple enough to migrate to rusqlite.
