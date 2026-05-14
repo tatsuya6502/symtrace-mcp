@@ -62,6 +62,43 @@ root = "project-b"
 
 Tool calls are automatically routed to the correct project's language server based on the file path (longest-prefix match).
 
+## Usage Statistics
+
+`symtrace-mcp` records tool call and language server lifecycle events in a per-project SQLite database at `.symtrace/stats.db`. Data is automatically deleted after 30 days.
+
+View a summary of the last 7 days:
+
+```bash
+symtrace-mcp stats
+```
+
+Example output:
+
+```
+Usage Stats (last 7 days)
+
+Tool Usage:
+  goto_definition            32 calls   89ms avg    2 errors
+  find_references            18 calls   45ms avg    0 errors
+  find_implementations        8 calls  120ms avg    1 errors
+  incoming_calls              5 calls   67ms avg    0 errors
+  outgoing_calls              3 calls   52ms avg    0 errors
+
+Top Files:
+  src/mcp/tools.rs                              28 calls
+  src/server/manager.rs                         15 calls
+  src/main.rs                                    8 calls
+
+Language Servers:
+  rust        started  3×  avg startup  2.3s  uptime 4h 12m total
+```
+
+If no data has been collected yet:
+
+```
+No stats data found.
+```
+
 ## Current Status
 
 **Phase 2 (Call Hierarchy)** — complete. Two MCP tools for call hierarchy traversal: `incoming_calls` (callers) and `outgoing_calls` (callees) via the callHierarchy protocol.

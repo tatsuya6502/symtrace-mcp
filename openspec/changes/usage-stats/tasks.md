@@ -34,14 +34,14 @@
 
 ## 6. CLI Subcommand (stats)
 
-- [ ] 6.1 Add clap-based CLI arg parsing to `src/main.rs` (default: run server, `stats`: print stats)
-- [ ] 6.2 Implement `print_stats(project_root)` function: query last 7 days, format tool usage section
-- [ ] 6.3 Add top files section (top 10 by call count)
-- [ ] 6.4 Add language servers section (startup count, avg startup time, total uptime)
-- [ ] 6.5 Handle missing database gracefully ("No stats data found")
+- [x] 6.1 Add clap-based CLI arg parsing to `src/main.rs` (default: run server, `stats`: print stats)
+- [x] 6.2 Implement `print_stats(project_root)` function: query last 7 days, format tool usage section
+- [x] 6.3 Add top files section (top 10 by call count)
+- [x] 6.4 Add language servers section (startup count, avg startup time, total uptime)
+- [x] 6.5 Handle missing database gracefully ("No stats data found")
 
 ## 7. Integration Testing
 
-- [ ] 7.1 Test end-to-end: tool calls produce stats rows, `stats` subcommand reads them
-- [ ] 7.2 Test concurrent tool calls don't cause DB errors (Mutex serialization)
-- [ ] 7.3 Test retention cleanup removes old rows
+- [x] 7.1 Test end-to-end: tool calls produce stats rows, `stats` subcommand reads them
+- [x] 7.2 Test concurrent tool calls don't cause DB errors (Mutex serialization)
+- [x] 7.3 Test retention cleanup removes old rows
