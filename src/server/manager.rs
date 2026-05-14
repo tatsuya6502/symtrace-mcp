@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use super::idle_monitor::IdleMonitor;
 use crate::lsp::client::{ClientError, LspClient};
 use crate::lsp::file_manager::FileManager;
+use crate::stats::StatsRecorder;
 
 /// Supported language identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -94,20 +95,26 @@ pub struct LanguageServerManager {
     servers: Mutex<HashMap<Language, ServerEntry>>,
     root: PathBuf,
     monitor: Arc<IdleMonitor>,
+    stats: Arc<Mutex<StatsRecorder>>,
 }
 
 impl LanguageServerManager {
     #[expect(dead_code)]
-    pub fn new(root: PathBuf) -> Self {
-        Self::with_configs(root, default_configs())
+    pub fn new(root: PathBuf, stats: Arc<Mutex<StatsRecorder>>) -> Self {
+        Self::with_configs(root, default_configs(), stats)
     }
 
-    pub fn with_configs(root: PathBuf, configs: HashMap<Language, LanguageServerConfig>) -> Self {
+    pub fn with_configs(
+        root: PathBuf,
+        configs: HashMap<Language, LanguageServerConfig>,
+        stats: Arc<Mutex<StatsRecorder>>,
+    ) -> Self {
         Self {
             configs,
             servers: Mutex::new(HashMap::new()),
             root,
-            monitor: Arc::new(IdleMonitor::new()),
+            monitor: Arc::new(IdleMonitor::new(stats.clone())),
+            stats,
         }
     }
 
@@ -181,39 +188,82 @@ impl LanguageServerManager {
             Language::Rust => crate::language::rust::client_capabilities(),
         };
 
-        let args: Vec<&str> = cfg.args.iter().map(|s| s.as_str()).collect();
-        let client = LspClient::start(&cfg.command, &args, &self.root, capabilities)
-            .await
-            .map_err(|e| ManagerError::StartupFailed(e.to_string()))?;
+        let start = std::time::Instant::now();
+        let lang_str = format!("{language:?}");
 
-        // Wait for the server to finish indexing (30s timeout).
-        let timeout = std::time::Duration::from_secs(30);
-        if let Err(e) = client.wait_for_index(timeout).await {
-            // Server started but didn't index in time — still usable,
-            // queries may just return empty results early on.
-            eprintln!("[manager] index wait warning: {e}");
+        let client_result =
+            LspClient::start(&cfg.command, &args_from(cfg), &self.root, capabilities).await;
+
+        match client_result {
+            Ok(client) => {
+                // Wait for the server to finish indexing (30s timeout).
+                let timeout = std::time::Duration::from_secs(30);
+                if let Err(e) = client.wait_for_index(timeout).await {
+                    eprintln!("[manager] index wait warning: {e}");
+                }
+
+                let duration_ms = start.elapsed().as_millis() as u64;
+                servers.insert(
+                    language,
+                    ServerEntry {
+                        client,
+                        file_manager: FileManager::new(),
+                    },
+                );
+
+                if let Err(e) = self
+                    .stats
+                    .lock()
+                    .await
+                    .record_server_event(&lang_str, "started", Some(duration_ms), None)
+                    .await
+                {
+                    eprintln!("stats recording failed: {e}");
+                }
+
+                Ok(())
+            }
+            Err(e) => {
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let err_msg = e.to_string();
+                if let Err(se) = self
+                    .stats
+                    .lock()
+                    .await
+                    .record_server_event(
+                        &lang_str,
+                        "startup_failed",
+                        Some(duration_ms),
+                        Some(&err_msg),
+                    )
+                    .await
+                {
+                    eprintln!("stats recording failed: {se}");
+                }
+                Err(ManagerError::StartupFailed(err_msg))
+            }
         }
-
-        servers.insert(
-            language,
-            ServerEntry {
-                client,
-                file_manager: FileManager::new(),
-            },
-        );
-
-        Ok(())
     }
 
     /// Stop a specific language server.
     pub async fn stop_server(&self, language: Language) -> Result<(), ManagerError> {
         let mut servers = self.servers.lock().await;
         if let Some(entry) = servers.remove(&language) {
-            // Close all tracked files first.
             let mut client = entry.client;
             let mut fm = entry.file_manager;
             fm.close_all(&mut client).await;
             client.shutdown().await.map_err(ManagerError::from)?;
+
+            let lang_str = format!("{language:?}");
+            if let Err(e) = self
+                .stats
+                .lock()
+                .await
+                .record_server_event(&lang_str, "stopped", None, Some("manual"))
+                .await
+            {
+                eprintln!("stats recording failed: {e}");
+            }
         }
         Ok(())
     }
@@ -228,7 +278,22 @@ impl LanguageServerManager {
                 let mut fm = entry.file_manager;
                 fm.close_all(&mut client).await;
                 let _ = client.shutdown().await;
+
+                let lang_str = format!("{language:?}");
+                if let Err(e) = self
+                    .stats
+                    .lock()
+                    .await
+                    .record_server_event(&lang_str, "stopped", None, Some("session_end"))
+                    .await
+                {
+                    eprintln!("stats recording failed: {e}");
+                }
             }
         }
     }
+}
+
+fn args_from(cfg: &LanguageServerConfig) -> Vec<&str> {
+    cfg.args.iter().map(|s| s.as_str()).collect()
 }

@@ -7,10 +7,13 @@ mod server;
 mod stats;
 mod uri;
 
+use std::sync::Arc;
+
 use config::SymtraceConfig;
 use mcp::tools::McpServer;
 use project::registry::ProjectRegistry;
 use stats::StatsRecorder;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
@@ -28,15 +31,15 @@ async fn main() {
         }
     };
 
-    let registry = ProjectRegistry::new(&config, &cwd).unwrap_or_else(|e| {
+    let stats = Arc::new(Mutex::new(StatsRecorder::new(&cwd)));
+    if let Err(e) = stats.lock().await.ensure_schema().await {
+        eprintln!("warning: failed to initialize stats database: {e}");
+    }
+
+    let registry = ProjectRegistry::new(&config, &cwd, stats.clone()).unwrap_or_else(|e| {
         eprintln!("error building project registry: {e}");
         std::process::exit(1);
     });
-
-    let stats = StatsRecorder::new(&cwd);
-    if let Err(e) = stats.ensure_schema().await {
-        eprintln!("warning: failed to initialize stats database: {e}");
-    }
 
     let mut server = McpServer::new(registry, stats);
     if let Err(e) = server.run().await {

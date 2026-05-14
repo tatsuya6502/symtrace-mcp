@@ -149,7 +149,10 @@ mod tests {
         // Verify rows via direct query
         let (_db, conn) = recorder.open().await.unwrap();
         let mut rows = conn
-            .query("SELECT tool, file_path, success, error_msg FROM tool_calls ORDER BY id", ())
+            .query(
+                "SELECT tool, file_path, success, error_msg FROM tool_calls ORDER BY id",
+                (),
+            )
             .await
             .unwrap();
 

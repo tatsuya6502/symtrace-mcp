@@ -21,16 +21,16 @@
 
 ## 4. Server Lifecycle Instrumentation
 
-- [ ] 4.1 Instrument `start_server_internal` to record startup events with duration
-- [ ] 4.2 Instrument `stop_server` to record shutdown events with reason
-- [ ] 4.3 Instrument `shutdown_all` to record session-end shutdown events
-- [ ] 4.4 Instrument `IdleMonitor` shutdown to record idle-timeout events
-- [ ] 4.5 Wire `StatsRecorder` through `LanguageServerManager` and `IdleMonitor`
+- [x] 4.1 Instrument `start_server_internal` to record startup events with duration
+- [x] 4.2 Instrument `stop_server` to record shutdown events with reason
+- [x] 4.3 Instrument `shutdown_all` to record session-end shutdown events
+- [x] 4.4 Instrument `IdleMonitor` shutdown to record idle-timeout events
+- [x] 4.5 Wire `StatsRecorder` through `LanguageServerManager` and `IdleMonitor`
 
 ## 5. Periodic Retention Cleanup
 
-- [ ] 5.1 Run `retention_cleanup()` on MCP server startup
-- [ ] 5.2 Spawn a background tokio task that runs cleanup every 24 hours
+- [x] 5.1 Run `retention_cleanup()` on MCP server startup
+- [x] 5.2 Spawn a background tokio task that runs cleanup every 24 hours
 
 ## 6. CLI Subcommand (stats)
 
