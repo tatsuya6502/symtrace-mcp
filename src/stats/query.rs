@@ -71,6 +71,7 @@ async fn print_server_usage(recorder: &StatsRecorder) {
 }
 
 fn format_duration_ms(ms: i64) -> String {
+    let ms = ms.max(0);
     if ms < 1000 {
         format!("{ms}ms")
     } else {
