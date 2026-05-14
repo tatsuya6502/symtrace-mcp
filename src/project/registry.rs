@@ -175,10 +175,10 @@ mod tests {
     use super::*;
     use crate::config::ProjectEntry;
 
-    fn test_stats() -> Arc<Mutex<StatsRecorder>> {
+    fn test_stats() -> (tempfile::TempDir, Arc<Mutex<StatsRecorder>>) {
         let dir = tempfile::tempdir().unwrap();
         let recorder = StatsRecorder::new(dir.path());
-        Arc::new(Mutex::new(recorder))
+        (dir, Arc::new(Mutex::new(recorder)))
     }
 
     #[test]
@@ -186,7 +186,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = SymtraceConfig::implicit(dir.path());
         let stats = test_stats();
-        let registry = ProjectRegistry::new(&config, dir.path(), stats).unwrap();
+        let registry = ProjectRegistry::new(&config, dir.path(), stats.1).unwrap();
 
         let file = dir.path().join("src/main.rs");
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -215,7 +215,7 @@ mod tests {
             ],
         };
 
-        let registry = ProjectRegistry::new(&config, base.path(), test_stats()).unwrap();
+        let registry = ProjectRegistry::new(&config, base.path(), test_stats().1).unwrap();
 
         let file_in_sub = sub_crate.join("src/lib.rs");
         std::fs::create_dir_all(file_in_sub.parent().unwrap()).unwrap();
@@ -236,7 +236,7 @@ mod tests {
     fn no_match_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let config = SymtraceConfig::implicit(dir.path());
-        let registry = ProjectRegistry::new(&config, dir.path(), test_stats()).unwrap();
+        let registry = ProjectRegistry::new(&config, dir.path(), test_stats().1).unwrap();
 
         let outside = tempfile::tempdir().unwrap();
         let file = outside.path().join("src/main.rs");

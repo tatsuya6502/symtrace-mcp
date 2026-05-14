@@ -74,7 +74,7 @@ symtrace-mcp stats
 
 出力例：
 
-```
+```text
 Usage Stats (last 7 days)
 
 Tool Usage:
@@ -95,7 +95,7 @@ Language Servers:
 
 データがまだ収集されていない場合：
 
-```
+```text
 No stats data found.
 ```
 

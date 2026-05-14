@@ -74,7 +74,7 @@ symtrace-mcp stats
 
 Example output:
 
-```
+```text
 Usage Stats (last 7 days)
 
 Tool Usage:
@@ -95,7 +95,7 @@ Language Servers:
 
 If no data has been collected yet:
 
-```
+```text
 No stats data found.
 ```
 

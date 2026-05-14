@@ -39,11 +39,15 @@ impl StatsRecorder {
     /// Open the database, ensuring the parent directory exists.
     async fn open(&self) -> Result<(turso::Database, turso::Connection), turso::Error> {
         if let Some(parent) = self.db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent).map_err(|e| {
+                turso::Error::Error(format!("failed to create stats directory: {e}"))
+            })?;
         }
-        let db = Builder::new_local(self.db_path.to_str().unwrap_or_default())
-            .build()
-            .await?;
+        let db = Builder::new_local(self.db_path.to_str().ok_or_else(|| {
+            turso::Error::Error("database path contains invalid UTF-8".to_string())
+        })?)
+        .build()
+        .await?;
         let conn = db.connect()?;
         Ok((db, conn))
     }
