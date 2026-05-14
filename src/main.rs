@@ -4,11 +4,13 @@ mod lsp;
 mod mcp;
 mod project;
 mod server;
+mod stats;
 mod uri;
 
 use config::SymtraceConfig;
 use mcp::tools::McpServer;
 use project::registry::ProjectRegistry;
+use stats::StatsRecorder;
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +33,12 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let mut server = McpServer::new(registry);
+    let stats = StatsRecorder::new(&cwd);
+    if let Err(e) = stats.ensure_schema().await {
+        eprintln!("warning: failed to initialize stats database: {e}");
+    }
+
+    let mut server = McpServer::new(registry, stats);
     if let Err(e) = server.run().await {
         eprintln!("symtrace-mcp error: {e}");
         std::process::exit(1);

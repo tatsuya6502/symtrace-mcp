@@ -1,23 +1,23 @@
 ## 1. Dependencies & Module Setup
 
-- [ ] 1.1 Add `turso` and `clap` dependencies to `Cargo.toml`
-- [ ] 1.2 Create `src/stats/` module with `mod.rs` re-exports
+- [x] 1.1 Add `turso` and `clap` dependencies to `Cargo.toml`
+- [x] 1.2 Create `src/stats/` module with `mod.rs` re-exports
 
 ## 2. Stats Storage Layer
 
-- [ ] 2.1 Implement `StatsRecorder` struct with open/write/close pattern (Turso DB)
-- [ ] 2.2 Implement schema initialization: `CREATE TABLE IF NOT EXISTS` for `tool_calls` and `server_events` with indexes
-- [ ] 2.3 Implement `record_tool_call(tool, file_path, duration_ms, success, error_msg)` method
-- [ ] 2.4 Implement `record_server_event(language, event, duration_ms, detail)` method
-- [ ] 2.5 Implement `retention_cleanup()` method that deletes rows older than 30 days
-- [ ] 2.6 Add unit tests for `StatsRecorder` (schema creation, insert, retention)
+- [x] 2.1 Implement `StatsRecorder` struct with open/write/close pattern (Turso DB)
+- [x] 2.2 Implement schema initialization: `CREATE TABLE IF NOT EXISTS` for `tool_calls` and `server_events` with indexes
+- [x] 2.3 Implement `record_tool_call(tool, file_path, duration_ms, success, error_msg)` method
+- [x] 2.4 Implement `record_server_event(language, event, duration_ms, detail)` method
+- [x] 2.5 Implement `retention_cleanup()` method that deletes rows older than 30 days
+- [x] 2.6 Add unit tests for `StatsRecorder` (schema creation, insert, retention)
 
 ## 3. Tool Call Instrumentation
 
-- [ ] 3.1 Add `Arc<Mutex<StatsRecorder>>` to `McpServer` struct
-- [ ] 3.2 Wrap tool handler dispatch in `handle_tools_call` with `Instant::now()` timing and stats recording
-- [ ] 3.3 Extract `file_path` from tool arguments for the stats row
-- [ ] 3.4 Handle stats recording errors gracefully (log to stderr, don't fail tool call)
+- [x] 3.1 Add `Arc<Mutex<StatsRecorder>>` to `McpServer` struct
+- [x] 3.2 Wrap tool handler dispatch in `handle_tools_call` with `Instant::now()` timing and stats recording
+- [x] 3.3 Extract `file_path` from tool arguments for the stats row
+- [x] 3.4 Handle stats recording errors gracefully (log to stderr, don't fail tool call)
 
 ## 4. Server Lifecycle Instrumentation
 
