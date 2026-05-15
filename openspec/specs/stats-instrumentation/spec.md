@@ -45,9 +45,9 @@ The system SHALL record a `server_events` row when a language server is stopped.
 - **WHEN** `stop_server` is called directly
 - **THEN** a row is inserted with `event: "stopped"` and `detail: "manual"`
 
-### Requirement: Stats recorder serialization
-Stats recording within the MCP server process SHALL be serialized via an `Arc<Mutex<StatsRecorder>>` to prevent concurrent database opens.
+### Requirement: Stats recorder concurrency
+The `StatsRecorder` SHALL be held behind `Arc<StatsRecorder>` (no `Mutex`). The `Database` type from turso 0.6.0 is `Clone + Send + Sync` and handles connection multiplexing internally, making concurrent database access safe by design.
 
 #### Scenario: Concurrent tool calls
 - **WHEN** two tool calls arrive concurrently
-- **THEN** their stats recordings are serialized; only one DB write is in flight at a time
+- **THEN** their stats recordings proceed concurrently via the `Database` handle; connection multiplexing is handled internally
