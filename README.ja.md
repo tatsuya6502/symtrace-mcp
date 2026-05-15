@@ -1,13 +1,13 @@
 # symtrace-mcp
 
-> [!CAUTION]
-> このプロジェクトは初期開発段階です。破壊的変更が予想されます。
+[![DeepWiki][deepwiki-badge]][deepwiki]
+[![GitHub Actions][gh-actions-badge]][gh-actions]
 
-AIコーディングエージェントとLanguage Server Protocolの橋渡しを行うMCP（Model Context Protocol）サーバーです。AIツールに代わって言語サーバープロセスを管理し、find-references、goto-definition、call-hierarchyトラバーサルなどの操作をstdio経由のMCPツールとして公開します。
+`symtrace-mcp`はAIコーディングエージェントとLanguage Server Protocolの橋渡しを行うMCP（Model Context Protocol）サーバーです。AIツールに代わって言語サーバープロセスを管理し、find-references、goto-definition、call-hierarchyトラバーサルなどの操作をstdio経由のMCPツールとして公開します。
 
 **遅延起動**と**自動アイドルシャットダウン**により、重い言語サーバープロセスはAIエージェントが深いコード解析を要求したときだけリソースを消費します。
 
-`ast-outline`などの既存のコード解析ツールを置き換えるものではなく、補完することを目的としています。
+`ast-outline`などの既存の軽量コード解析ツールを置き換えるものではなく、補完することを目的としています。
 
 ## symtrace-mcp と ast-outline の使い分け
 
@@ -99,21 +99,6 @@ Language Servers:
 No stats data found.
 ```
 
-## 現在のステータス
-
-**フェーズ 2（コール階層）** — 完了。`incoming_calls`（呼び出し元）と`outgoing_calls`（呼び出し先）の2つのMCPツールがcallHierarchyプロトコル経由で利用可能です。
-
-**フェーズ 1（最小機能）** — 完了。`find_references`、`goto_definition`、`find_implementations`の3つのMCPツールが利用可能です。サーバーはrust-analyzerを遅延起動し、mtime追跡付きでオープンファイルを管理し、アイドル状態のサーバーを自動的にシャットダウンします。`.symtrace.toml`によるマルチプロジェクト対応も完了しています。
-
-**フェーズ 0（基盤）** — 完了。
-
-**計画中のフェーズ：**
-
-| フェーズ | スコープ |
-|-------|-------|
-| **フェーズ 3: マルチ言語** | TypeScriptおよびPython対応 |
-| **フェーズ 4: 高度な機能** | `hover`、`diagnostics`、`rename` |
-
 ## インストール
 
 Rustプロジェクトを解析する場合は、`rust-analyzer`をインストールして`PATH`に含まれるようにしてください。
@@ -136,8 +121,46 @@ AIエージェントのツール設定に`symtrace-mcp`を追加し、実行可�
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
 ```
 
+競合を避けるため、組み込みの`rust-analyzer-lsp`プラグインを無効化してください：
+
+```bash
+## Claude Code
+claude plugin disable rust-analyzer-lsp@claude-plugins-official
+```
+
+または`~/.claude/settings.json`に以下を追加してください：
+
+```json
+{
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": false
+  }
+}
+```
+
 サーバーはstdinから改行区切りのJSON-RPC 2.0メッセージを読み取り、stdoutにレスポンスを出力します。
+
+## ロードマップ
+
+| 項目 | スコープ | ステータス |
+|------|-------|--------|
+| 基盤 | MCPプロトコル、LSPトランスポート、LSPプロセス管理 | 完了 |
+| 最小機能 | `find_references`、`goto_definition`、`find_implementations` | 完了 |
+| マルチプロジェクト設定 | `.symtrace.toml`、プロジェクトごとの言語サーバー | 完了 |
+| コール階層 | `incoming_calls`、`outgoing_calls` | 完了 |
+| 使用統計 | ツール呼び出し追跡、統計CLI、Tursoストレージ | 完了 |
+| マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
+| 高度な機能 | `hover`、`diagnostics`、`rename` | 計画中 |
+| インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
+| ドクターコマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
+| 言語別統計 | 言語ごとの使用統計、Tursoスキーママイグレーション | 計画中 |
 
 ## ライセンス
 
 [MIT](LICENSE)
+
+[deepwiki-badge]: https://deepwiki.com/badge.svg
+[gh-actions-badge]: https://github.com/tatsuya6502/symtrace-mcp/workflows/Test/badge.svg
+
+[deepwiki]: https://deepwiki.com/tatsuya6502/symtrace-mcp
+[gh-actions]: https://github.com/tatsuya6502/symtrace-mcp/actions?query=workflow%3ATest
