@@ -31,7 +31,7 @@ The system SHALL record a `server_events` row when a language server starts. The
 - **THEN** a row is inserted with `event: "startup_failed"` and the error message in `detail`
 
 ### Requirement: Language server shutdown instrumentation
-The system SHALL record a `server_events` row when a language server is stopped. The row SHALL contain: `language`, `event: "stopped"`, and `detail` indicating the reason ("idle_timeout" or "session_end").
+The system SHALL record a `server_events` row when a language server is stopped. The row SHALL contain: `language`, `event: "stopped"`, and `detail` indicating the reason ("idle_timeout", "session_end", or "manual").
 
 #### Scenario: Idle timeout shutdown
 - **WHEN** `IdleMonitor` shuts down a server due to idle timeout
