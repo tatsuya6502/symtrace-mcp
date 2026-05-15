@@ -582,9 +582,8 @@ fn parse_u32_field(value: &Value, field: &str) -> Result<u32, ToolError> {
         .get(field)
         .and_then(|v| v.as_u64())
         .ok_or_else(|| ToolError::invalid_params(format!("missing or invalid {field}")))?;
-    u32::try_from(raw).map_err(|_| {
-        ToolError::invalid_params(format!("{field} value {raw} is out of range"))
-    })
+    u32::try_from(raw)
+        .map_err(|_| ToolError::invalid_params(format!("{field} value {raw} is out of range")))
 }
 
 /// Wrap text output in MCP `tools/call` result envelope.

@@ -62,6 +62,43 @@ root = "project-b"
 
 ツール呼び出しはファイルパスに基づいて自動的に正しいプロジェクトの言語サーバーにルーティングされます（最長プレフィックスマッチ）。
 
+## 使用統計
+
+`symtrace-mcp`はツール呼び出しと言語サーバーのライフサイクルイベントをプロジェクトごとのSQLiteデータベース（`.symtrace/stats.db`）に記録します。データは30日後に自動的に削除されます。
+
+過去7日間のサマリーを表示します：
+
+```bash
+symtrace-mcp stats
+```
+
+出力例：
+
+```text
+Usage Stats (last 7 days)
+
+Tool Usage:
+  goto_definition            32 calls   89ms avg    2 errors
+  find_references            18 calls   45ms avg    0 errors
+  find_implementations        8 calls  120ms avg    1 errors
+  incoming_calls              5 calls   67ms avg    0 errors
+  outgoing_calls              3 calls   52ms avg    0 errors
+
+Top Files:
+  src/mcp/tools.rs                              28 calls
+  src/server/manager.rs                         15 calls
+  src/main.rs                                    8 calls
+
+Language Servers:
+  rust        started  3×  avg startup  2.3s  uptime 4h 12m total
+```
+
+データがまだ収集されていない場合：
+
+```text
+No stats data found.
+```
+
 ## 現在のステータス
 
 **フェーズ 2（コール階層）** — 完了。`incoming_calls`（呼び出し元）と`outgoing_calls`（呼び出し先）の2つのMCPツールがcallHierarchyプロトコル経由で利用可能です。

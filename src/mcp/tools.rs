@@ -5,11 +5,14 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{BufReader, stdin, stdout};
+use tokio::sync::Mutex;
 
 use super::handlers;
 use super::protocol;
 use crate::project::registry::ProjectRegistry;
+use crate::stats::StatsRecorder;
 
 /// Error returned by tool handlers, carrying an MCP error code.
 pub struct ToolError {
@@ -47,6 +50,7 @@ struct Tool {
 pub struct McpServer {
     tools: HashMap<String, Tool>,
     registry: Arc<ProjectRegistry>,
+    stats: Arc<Mutex<StatsRecorder>>,
 }
 
 /// Wrap an async handler into a boxed closure that clones the shared state per call.
@@ -62,12 +66,13 @@ macro_rules! tool_handler {
 }
 
 impl McpServer {
-    pub fn new(registry: ProjectRegistry) -> Self {
+    pub fn new(registry: ProjectRegistry, stats: Arc<Mutex<StatsRecorder>>) -> Self {
         let registry = Arc::new(registry);
 
         let mut server = Self {
             tools: HashMap::new(),
             registry: registry.clone(),
+            stats,
         };
 
         // Register the five MCP tools.
@@ -130,6 +135,23 @@ impl McpServer {
             .managers()
             .map(|manager| manager.clone().start_idle_monitor())
             .collect();
+
+        // Run retention cleanup on startup (5.1).
+        if let Err(e) = self.stats.lock().await.retention_cleanup().await {
+            eprintln!("stats retention cleanup failed: {e}");
+        }
+
+        // Spawn periodic cleanup every 24 hours (5.2).
+        let cleanup_stats = self.stats.clone();
+        let cleanup_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
+            loop {
+                interval.tick().await;
+                if let Err(e) = cleanup_stats.lock().await.retention_cleanup().await {
+                    eprintln!("stats retention cleanup failed: {e}");
+                }
+            }
+        });
 
         let result = async {
             let mut reader = BufReader::new(stdin());
@@ -197,7 +219,8 @@ impl McpServer {
         }
         .await;
 
-        // Graceful shutdown: stop all monitors and shut down all servers.
+        // Graceful shutdown: stop all monitors, cleanup task, and shut down all servers.
+        cleanup_handle.abort();
         for handle in monitor_handles {
             handle.abort();
         }
@@ -257,22 +280,56 @@ impl McpServer {
             );
         };
 
-        match self.tools.get(tool_name) {
+        let start = Instant::now();
+
+        let (response, success, error_msg) = match self.tools.get(tool_name) {
             Some(tool) => {
                 let args = params
                     .get("arguments")
                     .cloned()
                     .unwrap_or(Value::Object(Default::default()));
                 match (tool.handler)(args).await {
-                    Ok(result) => protocol::success_response(id, result),
-                    Err(e) => protocol::error_response(id.clone(), e.code, &e.message),
+                    Ok(result) => (protocol::success_response(id, result), true, None),
+                    Err(e) => (
+                        protocol::error_response(id.clone(), e.code, &e.message),
+                        false,
+                        Some(e.message),
+                    ),
                 }
             }
-            None => protocol::error_response(
-                id.clone(),
-                protocol::INVALID_PARAMS,
-                &format!("unknown tool: {tool_name}"),
+            None => (
+                protocol::error_response(
+                    id.clone(),
+                    protocol::INVALID_PARAMS,
+                    &format!("unknown tool: {tool_name}"),
+                ),
+                false,
+                Some("unknown tool".to_string()),
             ),
+        };
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let file_path = params
+            .get("arguments")
+            .and_then(|a| a.get("file_path"))
+            .and_then(|v| v.as_str());
+
+        if let Err(e) = self
+            .stats
+            .lock()
+            .await
+            .record_tool_call(
+                tool_name,
+                file_path,
+                duration_ms,
+                success,
+                error_msg.as_deref(),
+            )
+            .await
+        {
+            eprintln!("stats recording failed: {e}");
         }
+
+        response
     }
 }
