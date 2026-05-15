@@ -13,11 +13,11 @@ const DEFAULT_CHECK_INTERVAL_SECS: u64 = 60;
 pub struct IdleMonitor {
     last_used: Mutex<HashMap<Language, Instant>>,
     check_interval: Duration,
-    stats: Arc<Mutex<StatsRecorder>>,
+    stats: Arc<StatsRecorder>,
 }
 
 impl IdleMonitor {
-    pub fn new(stats: Arc<Mutex<StatsRecorder>>) -> Self {
+    pub fn new(stats: Arc<StatsRecorder>) -> Self {
         Self {
             last_used: Mutex::new(HashMap::new()),
             check_interval: Duration::from_secs(DEFAULT_CHECK_INTERVAL_SECS),
@@ -65,8 +65,6 @@ impl IdleMonitor {
                 let lang_str = format!("{language:?}");
                 if let Err(e) = self
                     .stats
-                    .lock()
-                    .await
                     .record_server_event(&lang_str, "stopped", None, Some("idle_timeout"))
                     .await
                 {

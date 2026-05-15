@@ -1,13 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use turso::Builder;
 
 /// Records usage statistics to a per-project SQLite database.
 ///
-/// Uses an open/write/close pattern: each operation opens the database,
-/// performs its write, and drops the connection. This allows the
-/// `symtrace-mcp stats` CLI to read the database while the MCP server runs.
+/// Holds a shared `Database` handle built with multiprocess WAL support.
+/// Each operation creates a fresh `Connection` via `db.connect()`.
 pub struct StatsRecorder {
-    db_path: PathBuf,
+    db: turso::Database,
 }
 
 pub struct ToolUsage {
@@ -30,31 +29,27 @@ pub struct ServerUsage {
 }
 
 impl StatsRecorder {
-    pub fn new(project_root: &Path) -> Self {
-        Self {
-            db_path: project_root.join(".symtrace").join("stats.db"),
-        }
-    }
-
-    /// Open the database, ensuring the parent directory exists.
-    async fn open(&self) -> Result<(turso::Database, turso::Connection), turso::Error> {
-        if let Some(parent) = self.db_path.parent() {
+    pub async fn new(project_root: &Path) -> Result<Self, turso::Error> {
+        let db_path = project_root.join(".symtrace").join("stats.db");
+        if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 turso::Error::Error(format!("failed to create stats directory: {e}"))
             })?;
         }
-        let db = Builder::new_local(self.db_path.to_str().ok_or_else(|| {
+        let db = Builder::new_local(db_path.to_str().ok_or_else(|| {
             turso::Error::Error("database path contains invalid UTF-8".to_string())
         })?)
+        .experimental_multiprocess_wal(true)
         .build()
         .await?;
-        let conn = db.connect()?;
-        Ok((db, conn))
+
+        let recorder = Self { db };
+        recorder.ensure_schema().await?;
+        Ok(recorder)
     }
 
-    /// Initialize the database schema. Safe to call multiple times.
-    pub async fn ensure_schema(&self) -> Result<(), turso::Error> {
-        let (_db, conn) = self.open().await?;
+    async fn ensure_schema(&self) -> Result<(), turso::Error> {
+        let conn = self.db.connect()?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS tool_calls (\
                 id INTEGER PRIMARY KEY,\
@@ -81,7 +76,6 @@ impl StatsRecorder {
         Ok(())
     }
 
-    /// Record a tool call event.
     pub async fn record_tool_call(
         &self,
         tool: &str,
@@ -90,7 +84,7 @@ impl StatsRecorder {
         success: bool,
         error_msg: Option<&str>,
     ) -> Result<(), turso::Error> {
-        let (_db, conn) = self.open().await?;
+        let conn = self.db.connect()?;
         conn.execute(
             "INSERT INTO tool_calls (timestamp, tool, file_path, duration_ms, success, error_msg) \
              VALUES (datetime('now'), ?, ?, ?, ?, ?)",
@@ -100,7 +94,6 @@ impl StatsRecorder {
         Ok(())
     }
 
-    /// Record a server lifecycle event.
     pub async fn record_server_event(
         &self,
         language: &str,
@@ -108,7 +101,7 @@ impl StatsRecorder {
         duration_ms: Option<u64>,
         detail: Option<&str>,
     ) -> Result<(), turso::Error> {
-        let (_db, conn) = self.open().await?;
+        let conn = self.db.connect()?;
         conn.execute(
             "INSERT INTO server_events (timestamp, language, event, duration_ms, detail) \
              VALUES (datetime('now'), ?, ?, ?, ?)",
@@ -118,9 +111,8 @@ impl StatsRecorder {
         Ok(())
     }
 
-    /// Delete rows older than 30 days from both tables.
     pub async fn retention_cleanup(&self) -> Result<(), turso::Error> {
-        let (_db, conn) = self.open().await?;
+        let conn = self.db.connect()?;
         conn.execute(
             "DELETE FROM tool_calls WHERE timestamp < datetime('now', '-30 days')",
             (),
@@ -134,13 +126,8 @@ impl StatsRecorder {
         Ok(())
     }
 
-    /// Check if the database file exists.
-    pub fn db_exists(&self) -> bool {
-        self.db_path.exists()
-    }
-
     pub async fn query_tool_usage(&self) -> Result<Vec<ToolUsage>, turso::Error> {
-        let (_db, conn) = self.open().await?;
+        let conn = self.db.connect()?;
         let mut rows = conn
             .query(
                 "SELECT tool, COUNT(*) as calls, \
@@ -166,7 +153,7 @@ impl StatsRecorder {
     }
 
     pub async fn query_top_files(&self) -> Result<Vec<FileUsage>, turso::Error> {
-        let (_db, conn) = self.open().await?;
+        let conn = self.db.connect()?;
         let mut rows = conn
             .query(
                 "SELECT file_path, COUNT(*) as calls \
@@ -188,7 +175,7 @@ impl StatsRecorder {
     }
 
     pub async fn query_server_usage(&self) -> Result<Vec<ServerUsage>, turso::Error> {
-        let (_db, conn) = self.open().await?;
+        let conn = self.db.connect()?;
         let mut rows = conn
             .query(
                 "SELECT language, event, duration_ms, timestamp \
@@ -288,29 +275,25 @@ fn ts_to_secs(ts: &str) -> Option<i64> {
 mod tests {
     use std::sync::Arc;
 
-    use tokio::sync::Mutex;
-
     use super::*;
 
-    fn test_recorder(dir: &std::path::Path) -> StatsRecorder {
-        StatsRecorder::new(dir)
+    async fn test_recorder(dir: &std::path::Path) -> StatsRecorder {
+        StatsRecorder::new(dir).await.unwrap()
     }
 
     #[tokio::test]
     async fn schema_creates_tables() {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = test_recorder(dir.path());
-        recorder.ensure_schema().await.unwrap();
+        let _recorder = test_recorder(dir.path()).await;
 
-        // Second call should succeed (IF NOT EXISTS)
-        recorder.ensure_schema().await.unwrap();
+        // Second instance should succeed (IF NOT EXISTS)
+        let _recorder2 = test_recorder(dir.path()).await;
     }
 
     #[tokio::test]
     async fn record_tool_call_inserts_row() {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = test_recorder(dir.path());
-        recorder.ensure_schema().await.unwrap();
+        let recorder = test_recorder(dir.path()).await;
 
         recorder
             .record_tool_call("goto_definition", Some("src/main.rs"), 42, true, None)
@@ -322,8 +305,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify rows via direct query
-        let (_db, conn) = recorder.open().await.unwrap();
+        let conn = recorder.db.connect().unwrap();
         let mut rows = conn
             .query(
                 "SELECT tool, file_path, success, error_msg FROM tool_calls ORDER BY id",
@@ -348,15 +330,14 @@ mod tests {
     #[tokio::test]
     async fn record_server_event_inserts_row() {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = test_recorder(dir.path());
-        recorder.ensure_schema().await.unwrap();
+        let recorder = test_recorder(dir.path()).await;
 
         recorder
             .record_server_event("rust", "started", Some(2300), None)
             .await
             .unwrap();
 
-        let (_db, conn) = recorder.open().await.unwrap();
+        let conn = recorder.db.connect().unwrap();
         let mut rows = conn
             .query(
                 "SELECT language, event, duration_ms, detail FROM server_events",
@@ -375,11 +356,9 @@ mod tests {
     #[tokio::test]
     async fn retention_cleanup_removes_old_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = test_recorder(dir.path());
-        recorder.ensure_schema().await.unwrap();
+        let recorder = test_recorder(dir.path()).await;
 
-        // Insert a row with an explicit old timestamp
-        let (_db, conn) = recorder.open().await.unwrap();
+        let conn = recorder.db.connect().unwrap();
         conn.execute(
             "INSERT INTO tool_calls (timestamp, tool, file_path, duration_ms, success, error_msg) \
              VALUES (datetime('now', '-31 days'), 'old_tool', 'old.rs', 1, 1, NULL)",
@@ -388,7 +367,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Insert a current row
         conn.execute(
             "INSERT INTO tool_calls (timestamp, tool, file_path, duration_ms, success, error_msg) \
              VALUES (datetime('now'), 'new_tool', 'new.rs', 1, 1, NULL)",
@@ -397,12 +375,10 @@ mod tests {
         .await
         .unwrap();
 
-        // Run retention
         drop(conn);
         recorder.retention_cleanup().await.unwrap();
 
-        // Verify only the new row remains
-        let (_db, conn) = recorder.open().await.unwrap();
+        let conn = recorder.db.connect().unwrap();
         let mut rows = conn
             .query("SELECT tool FROM tool_calls ORDER BY id", ())
             .await
@@ -416,8 +392,7 @@ mod tests {
     #[tokio::test]
     async fn end_to_end_tool_call_stats() {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = test_recorder(dir.path());
-        recorder.ensure_schema().await.unwrap();
+        let recorder = test_recorder(dir.path()).await;
 
         recorder
             .record_tool_call("goto_definition", Some("src/main.rs"), 50, true, None)
@@ -462,16 +437,13 @@ mod tests {
     #[tokio::test]
     async fn concurrent_tool_calls_serialized() {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = Arc::new(Mutex::new(test_recorder(dir.path())));
-        recorder.lock().await.ensure_schema().await.unwrap();
+        let recorder = Arc::new(test_recorder(dir.path()).await);
 
         let mut handles = Vec::new();
         for i in 0..10 {
             let r = recorder.clone();
             handles.push(tokio::spawn(async move {
-                r.lock()
-                    .await
-                    .record_tool_call("test_tool", Some("file.rs"), i, true, None)
+                r.record_tool_call("test_tool", Some("file.rs"), i, true, None)
                     .await
                     .unwrap();
             }));
@@ -481,7 +453,7 @@ mod tests {
             handle.await.unwrap();
         }
 
-        let tool_usage = recorder.lock().await.query_tool_usage().await.unwrap();
+        let tool_usage = recorder.query_tool_usage().await.unwrap();
         assert_eq!(tool_usage.len(), 1);
         assert_eq!(tool_usage[0].tool, "test_tool");
         assert_eq!(tool_usage[0].calls, 10);
@@ -490,10 +462,9 @@ mod tests {
     #[tokio::test]
     async fn retention_cleanup_integration() {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = test_recorder(dir.path());
-        recorder.ensure_schema().await.unwrap();
+        let recorder = test_recorder(dir.path()).await;
 
-        let (_db, conn) = recorder.open().await.unwrap();
+        let conn = recorder.db.connect().unwrap();
         conn.execute(
             "INSERT INTO tool_calls (timestamp, tool, file_path, duration_ms, success, error_msg) \
              VALUES (datetime('now', '-31 days'), 'old_tool', 'old.rs', 1, 1, NULL)",
@@ -519,12 +490,10 @@ mod tests {
 
         recorder.retention_cleanup().await.unwrap();
 
-        // Old tool call should be gone, new one remains
         let tool_usage = recorder.query_tool_usage().await.unwrap();
         assert_eq!(tool_usage.len(), 1);
         assert_eq!(tool_usage[0].tool, "new_tool");
 
-        // Old server event should be gone
         let server_usage = recorder.query_server_usage().await.unwrap();
         assert!(server_usage.is_empty());
     }

@@ -14,7 +14,6 @@ use config::SymtraceConfig;
 use mcp::tools::McpServer;
 use project::registry::ProjectRegistry;
 use stats::StatsRecorder;
-use tokio::sync::Mutex;
 
 #[derive(Parser)]
 #[command(name = "symtrace-mcp")]
@@ -54,10 +53,13 @@ async fn run_server(cwd: &std::path::Path) {
         }
     };
 
-    let stats = Arc::new(Mutex::new(StatsRecorder::new(cwd)));
-    if let Err(e) = stats.lock().await.ensure_schema().await {
-        eprintln!("warning: failed to initialize stats database: {e}");
-    }
+    let stats = match StatsRecorder::new(cwd).await {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            eprintln!("warning: failed to initialize stats database: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let registry = ProjectRegistry::new(&config, cwd, stats.clone()).unwrap_or_else(|e| {
         eprintln!("error building project registry: {e}");

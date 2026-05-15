@@ -7,7 +7,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{BufReader, stdin, stdout};
-use tokio::sync::Mutex;
 
 use super::handlers;
 use super::protocol;
@@ -50,7 +49,7 @@ struct Tool {
 pub struct McpServer {
     tools: HashMap<String, Tool>,
     registry: Arc<ProjectRegistry>,
-    stats: Arc<Mutex<StatsRecorder>>,
+    stats: Arc<StatsRecorder>,
 }
 
 /// Wrap an async handler into a boxed closure that clones the shared state per call.
@@ -66,7 +65,7 @@ macro_rules! tool_handler {
 }
 
 impl McpServer {
-    pub fn new(registry: ProjectRegistry, stats: Arc<Mutex<StatsRecorder>>) -> Self {
+    pub fn new(registry: ProjectRegistry, stats: Arc<StatsRecorder>) -> Self {
         let registry = Arc::new(registry);
 
         let mut server = Self {
@@ -137,7 +136,7 @@ impl McpServer {
             .collect();
 
         // Run retention cleanup on startup (5.1).
-        if let Err(e) = self.stats.lock().await.retention_cleanup().await {
+        if let Err(e) = self.stats.retention_cleanup().await {
             eprintln!("stats retention cleanup failed: {e}");
         }
 
@@ -147,7 +146,7 @@ impl McpServer {
             let mut interval = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
             loop {
                 interval.tick().await;
-                if let Err(e) = cleanup_stats.lock().await.retention_cleanup().await {
+                if let Err(e) = cleanup_stats.retention_cleanup().await {
                     eprintln!("stats retention cleanup failed: {e}");
                 }
             }
@@ -316,8 +315,6 @@ impl McpServer {
 
         if let Err(e) = self
             .stats
-            .lock()
-            .await
             .record_tool_call(
                 tool_name,
                 file_path,

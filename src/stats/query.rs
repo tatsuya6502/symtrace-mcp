@@ -3,12 +3,13 @@ use std::path::Path;
 use super::recorder::StatsRecorder;
 
 pub async fn print_stats(project_root: &Path) {
-    let recorder = StatsRecorder::new(project_root);
-
-    if !recorder.db_exists() {
-        println!("No stats data found.");
-        return;
-    }
+    let recorder = match StatsRecorder::new(project_root).await {
+        Ok(r) => r,
+        Err(_) => {
+            println!("No stats data found.");
+            return;
+        }
+    };
 
     println!("Usage Stats (last 7 days)\n");
 
