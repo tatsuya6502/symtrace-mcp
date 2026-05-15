@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_tool_calls_serialized() {
+    async fn concurrent_tool_calls_persist_all_rows() {
         let dir = tempfile::tempdir().unwrap();
         let recorder = Arc::new(test_recorder(dir.path()).await);
 

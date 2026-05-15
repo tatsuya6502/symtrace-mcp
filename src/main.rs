@@ -56,7 +56,7 @@ async fn run_server(cwd: &std::path::Path) {
     let stats = match StatsRecorder::new(cwd).await {
         Ok(s) => Arc::new(s),
         Err(e) => {
-            eprintln!("warning: failed to initialize stats database: {e}");
+            eprintln!("error: failed to initialize stats database: {e}");
             std::process::exit(1);
         }
     };
