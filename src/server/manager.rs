@@ -95,19 +95,19 @@ pub struct LanguageServerManager {
     servers: Mutex<HashMap<Language, ServerEntry>>,
     root: PathBuf,
     monitor: Arc<IdleMonitor>,
-    stats: Arc<Mutex<StatsRecorder>>,
+    stats: Arc<StatsRecorder>,
 }
 
 impl LanguageServerManager {
     #[expect(dead_code)]
-    pub fn new(root: PathBuf, stats: Arc<Mutex<StatsRecorder>>) -> Self {
+    pub fn new(root: PathBuf, stats: Arc<StatsRecorder>) -> Self {
         Self::with_configs(root, default_configs(), stats)
     }
 
     pub fn with_configs(
         root: PathBuf,
         configs: HashMap<Language, LanguageServerConfig>,
-        stats: Arc<Mutex<StatsRecorder>>,
+        stats: Arc<StatsRecorder>,
     ) -> Self {
         Self {
             configs,
@@ -213,8 +213,6 @@ impl LanguageServerManager {
 
                 if let Err(e) = self
                     .stats
-                    .lock()
-                    .await
                     .record_server_event(&lang_str, "started", Some(duration_ms), None)
                     .await
                 {
@@ -228,8 +226,6 @@ impl LanguageServerManager {
                 let err_msg = e.to_string();
                 if let Err(se) = self
                     .stats
-                    .lock()
-                    .await
                     .record_server_event(
                         &lang_str,
                         "startup_failed",
@@ -257,8 +253,6 @@ impl LanguageServerManager {
             let lang_str = format!("{language:?}");
             if let Err(e) = self
                 .stats
-                .lock()
-                .await
                 .record_server_event(&lang_str, "stopped", None, Some("manual"))
                 .await
             {
@@ -282,8 +276,6 @@ impl LanguageServerManager {
                 let lang_str = format!("{language:?}");
                 if let Err(e) = self
                     .stats
-                    .lock()
-                    .await
                     .record_server_event(&lang_str, "stopped", None, Some("session_end"))
                     .await
                 {

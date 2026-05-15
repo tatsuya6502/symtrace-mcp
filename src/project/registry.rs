@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
-
 use crate::config::SymtraceConfig;
 use crate::server::manager::{Language, LanguageServerConfig, LanguageServerManager};
 use crate::stats::StatsRecorder;
@@ -61,7 +59,7 @@ impl ProjectRegistry {
     pub fn new(
         config: &SymtraceConfig,
         cwd: &Path,
-        stats: Arc<Mutex<StatsRecorder>>,
+        stats: Arc<StatsRecorder>,
     ) -> Result<Self, RegistryError> {
         let server_configs = Self::build_server_configs(&config.server);
         let project_entries = if config.projects.is_empty() {
@@ -175,17 +173,17 @@ mod tests {
     use super::*;
     use crate::config::ProjectEntry;
 
-    fn test_stats() -> (tempfile::TempDir, Arc<Mutex<StatsRecorder>>) {
+    async fn test_stats() -> (tempfile::TempDir, Arc<StatsRecorder>) {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = StatsRecorder::new(dir.path());
-        (dir, Arc::new(Mutex::new(recorder)))
+        let recorder = StatsRecorder::new(dir.path()).await.unwrap();
+        (dir, Arc::new(recorder))
     }
 
-    #[test]
-    fn single_project_matches_file() {
+    #[tokio::test]
+    async fn single_project_matches_file() {
         let dir = tempfile::tempdir().unwrap();
         let config = SymtraceConfig::implicit(dir.path());
-        let stats = test_stats();
+        let stats = test_stats().await;
         let registry = ProjectRegistry::new(&config, dir.path(), stats.1).unwrap();
 
         let file = dir.path().join("src/main.rs");
@@ -196,8 +194,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn longest_prefix_match() {
+    #[tokio::test]
+    async fn longest_prefix_match() {
         let base = tempfile::tempdir().unwrap();
         let project_a = base.path().join("project-a");
         let sub_crate = project_a.join("sub-crate");
@@ -215,7 +213,7 @@ mod tests {
             ],
         };
 
-        let registry = ProjectRegistry::new(&config, base.path(), test_stats().1).unwrap();
+        let registry = ProjectRegistry::new(&config, base.path(), test_stats().await.1).unwrap();
 
         let file_in_sub = sub_crate.join("src/lib.rs");
         std::fs::create_dir_all(file_in_sub.parent().unwrap()).unwrap();
@@ -232,11 +230,11 @@ mod tests {
         assert!(!Arc::ptr_eq(manager, manager_a));
     }
 
-    #[test]
-    fn no_match_returns_error() {
+    #[tokio::test]
+    async fn no_match_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let config = SymtraceConfig::implicit(dir.path());
-        let registry = ProjectRegistry::new(&config, dir.path(), test_stats().1).unwrap();
+        let registry = ProjectRegistry::new(&config, dir.path(), test_stats().await.1).unwrap();
 
         let outside = tempfile::tempdir().unwrap();
         let file = outside.path().join("src/main.rs");

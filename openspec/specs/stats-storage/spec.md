@@ -26,15 +26,15 @@ The system SHALL maintain a `server_events` table with columns: `id` (INTEGER PR
 - **THEN** the `server_events` table and its index exist
 
 ### Requirement: Open/write/close pattern
-The system SHALL open the database, perform the write operation, and close the database for each stats recording. The database SHALL NOT be held open between tool calls.
+The system SHALL hold a shared `Database` handle and create a new `Connection` via `db.connect()` for each operation. The `Database` SHALL be built with `experimental_multiprocess_wal(true)` to enable concurrent access from the MCP server and the `symtrace-mcp stats` CLI.
 
 #### Scenario: Tool call records stats
 - **WHEN** a tool call completes and stats are recorded
-- **THEN** the system opens `stats.db`, inserts a row, and closes the database
+- **THEN** the system creates a `Connection` from the shared `Database`, inserts a row, and drops the `Connection`
 
-#### Scenario: CLI reads stats while server is idle
-- **WHEN** `symtrace-mcp stats` is run while the MCP server is running but between tool calls
-- **THEN** the CLI can open and read the database because the server has closed it
+#### Scenario: CLI reads stats concurrently
+- **WHEN** `symtrace-mcp stats` is run while the MCP server is running
+- **THEN** the CLI can open and read the database concurrently via multiprocess WAL support
 
 ### Requirement: Data retention with 30-day rolling window
 The system SHALL delete rows older than 30 days from both tables. Deletion SHALL occur on MCP server startup and periodically every 24 hours during a session.
