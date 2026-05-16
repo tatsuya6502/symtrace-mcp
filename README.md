@@ -64,7 +64,7 @@ Tool calls are automatically routed to the correct project's language server bas
 
 ## Usage Statistics
 
-`symtrace-mcp` records tool call and language server lifecycle events in a per-project SQLite database at `.symtrace/stats.db`. Data is automatically deleted after 30 days.
+`symtrace-mcp` records tool call and language server lifecycle events in a per-project [Turso](https://github.com/tursodatabase/turso) database (SQLite-compatible) at `.symtrace/stats.db`. Data is automatically deleted after 30 days.
 
 View a summary of the last 7 days:
 
@@ -116,7 +116,8 @@ cargo install --path .
 
 Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
 
-**Claude Code example**
+<detail>
+  <summary>Claude Code example</summary>
 
 ```bash
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
@@ -138,6 +139,8 @@ Or add the following to `~/.claude/settings.json`:
 }
 ```
 
+</detail>
+
 **MCP Protocol**
 
 The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes responses to stdout.
@@ -150,14 +153,12 @@ The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes r
 | Minimal Features | `find_references`, `goto_definition`, `find_implementations` | Complete |
 | Multi-Project Config | `.symtrace.toml`, per-project language servers | Complete |
 | Call Hierarchy | `incoming_calls`, `outgoing_calls` | Complete |
-| Usage Stats | Tool call tracking, stats CLI, SQLite storage\* | Complete |
+| Usage Stats | Tool call tracking, stats CLI, SQLite storage | Complete |
 | Multi-language | TypeScript and Python support | Planned |
 | Advanced Features | `hover`, `diagnostics`, `rename` | Planned |
 | Installers & Upgrade | `curl \| sh` installer, Homebrew tap, `symtrace-mcp upgrade` | Planned |
 | Doctor Command | `symtrace-mcp doctor` — environment checks and prerequisite validation | Planned |
 | Stats Per Language | Group usage stats by language, schema migration | Planned |
-
-\* Using [Turso](https://github.com/tursodatabase/turso), a SQLite-compatible database.
 
 ## License
 

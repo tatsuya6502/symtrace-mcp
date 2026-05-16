@@ -64,7 +64,7 @@ root = "project-b"
 
 ## 使用統計
 
-`symtrace-mcp`はツール呼び出しと言語サーバーのライフサイクルイベントをプロジェクトごとのSQLiteデータベース（`.symtrace/stats.db`）に記録します。データは30日後に自動的に削除されます。
+`symtrace-mcp`はツール呼び出しと言語サーバーのライフサイクルイベントをプロジェクトごとの[Turso](https://github.com/tursodatabase/turso)データベース（SQLite互換、`.symtrace/stats.db`）に記録します。データは30日後に自動的に削除されます。
 
 過去7日間のサマリーを表示します：
 
@@ -116,15 +116,16 @@ cargo install --path .
 
 AIエージェントのツール設定に`symtrace-mcp`を追加し、実行可能ファイルのパスと必要な引数を指定します。
 
+<detail>
+  <summary>Claude Code example</summary>
+
 ```bash
-## Claude Code
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
 ```
 
 重複する言語サーバーインスタンスの起動を防ぐため、組み込みの`rust-analyzer-lsp`プラグインを無効化してください：
 
 ```bash
-## Claude Code
 claude plugin disable rust-analyzer-lsp@claude-plugins-official
 ```
 
@@ -138,6 +139,10 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 }
 ```
 
+</detail>
+
+**MCP Protocol**
+
 サーバーはstdinから改行区切りのJSON-RPC 2.0メッセージを読み取り、stdoutにレスポンスを出力します。
 
 ## ロードマップ
@@ -148,14 +153,12 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 | 最小機能 | `find_references`、`goto_definition`、`find_implementations` | 完了 |
 | マルチプロジェクト設定 | `.symtrace.toml`、プロジェクトごとの言語サーバー | 完了 |
 | コール階層 | `incoming_calls`、`outgoing_calls` | 完了 |
-| 使用統計 | ツール呼び出し追跡、統計CLI、SQLiteストレージ\* | 完了 |
+| 使用統計 | ツール呼び出し追跡、統計CLI、SQLiteストレージ | 完了 |
 | マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
 | 高度な機能 | `hover`、`diagnostics`、`rename` | 計画中 |
 | インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
 | ドクターコマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
 | 言語別統計 | 言語ごとの使用統計、スキーママイグレーション | 計画中 |
-
-\* [Turso](https://github.com/tursodatabase/turso)（SQLite互換データベース）を使用
 
 ## ライセンス
 
