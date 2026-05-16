@@ -154,7 +154,7 @@ The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes r
 | Minimal Features | `find_references`, `goto_definition`, `find_implementations` | Complete |
 | Multi-Project Config | `.symtrace.toml`, per-project language servers | Complete |
 | Call Hierarchy | `incoming_calls`, `outgoing_calls` | Complete |
-| Usage Stats | Tool call tracking, stats CLI, SQLite storage | Complete |
+| Usage Stats | Tool call tracking, stats CLI, SQLite-compatible storage | Complete |
 | Multi-language | TypeScript and Python support | Planned |
 | Advanced Features | `hover`, `diagnostics`, `rename` | Planned |
 | Installers & Upgrade | `curl \| sh` installer, Homebrew tap, `symtrace-mcp upgrade` | Planned |

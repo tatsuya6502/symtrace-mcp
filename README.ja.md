@@ -153,7 +153,7 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 | 最小機能 | `find_references`、`goto_definition`、`find_implementations` | 完了 |
 | マルチプロジェクト設定 | `.symtrace.toml`、プロジェクトごとの言語サーバー | 完了 |
 | コール階層 | `incoming_calls`、`outgoing_calls` | 完了 |
-| 使用統計 | ツール呼び出し追跡、統計CLI、SQLiteストレージ | 完了 |
+| 使用統計 | ツール呼び出し追跡、統計CLI、SQLite互換ストレージ | 完了 |
 | マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
 | 高度な機能 | `hover`、`diagnostics`、`rename` | 計画中 |
 | インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
