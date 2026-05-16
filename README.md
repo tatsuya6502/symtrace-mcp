@@ -111,12 +111,13 @@ rustup component add rust-src
 Clone the repository and install the server:
 
 ```bash
+cd symtrace-mcp
 cargo install --path .
 ```
 
 Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
 
-<detail>
+<details>
   <summary>Claude Code example</summary>
 
 ```bash
@@ -139,9 +140,9 @@ Or add the following to `~/.claude/settings.json`:
 }
 ```
 
-</detail>
+</details>
 
-**MCP Protocol**
+### MCP Protocol
 
 The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes responses to stdout.
 

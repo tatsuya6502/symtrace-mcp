@@ -116,7 +116,7 @@ cargo install --path .
 
 AIエージェントのツール設定に`symtrace-mcp`を追加し、実行可能ファイルのパスと必要な引数を指定します。
 
-<detail>
+<details>
   <summary>Claude Code example</summary>
 
 ```bash
@@ -139,9 +139,9 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 }
 ```
 
-</detail>
+</details>
 
-**MCP Protocol**
+### MCP Protocol
 
 サーバーはstdinから改行区切りのJSON-RPC 2.0メッセージを読み取り、stdoutにレスポンスを出力します。
 
@@ -157,7 +157,7 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 | マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
 | 高度な機能 | `hover`、`diagnostics`、`rename` | 計画中 |
 | インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
-| ドクターコマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
+| 診断コマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
 | 言語別統計 | 言語ごとの使用統計、スキーママイグレーション | 計画中 |
 
 ## ライセンス
