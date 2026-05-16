@@ -1,13 +1,13 @@
 # symtrace-mcp
 
-> [!CAUTION]
-> This project is in early development. Expect breaking changes.
+[![DeepWiki][deepwiki-badge]][deepwiki]
+[![GitHub Actions][gh-actions-badge]][gh-actions]
 
-An MCP (Model Context Protocol) server that acts as a bridge between AI coding agents and the Language Server Protocol. It manages language server processes on behalf of AI tools, exposing operations like find-references, goto-definition, and call-hierarchy traversal as MCP tools over stdio.
+`symtrace-mcp` is an MCP (Model Context Protocol) server that acts as a bridge between AI coding agents and the Language Server Protocol. It manages language server processes on behalf of AI tools, exposing operations like find-references, goto-definition, and call-hierarchy traversal as MCP tools over stdio.
 
 **Lazy startup** and **automatic idle shutdown** ensure that heavy language server processes only consume resources when the AI agent specifically requests deep code analysis.
 
-It is designed to complement, not replace, existing code analysis tools like `ast-outline`.
+It is designed to complement, not replace, existing lightweight code analysis tools like `ast-outline`.
 
 ## When to Use symtrace-mcp vs ast-outline
 
@@ -39,7 +39,7 @@ symtrace-mcp communicates with language servers via the Language Server Protocol
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | Planned |
 | Python | [pyright](https://github.com/microsoft/pyright) | Planned |
 
-Language support is configured per-project. Adding a new language requires only a language server entry — no code changes needed.
+Language support is configured per-project. The goal is for adding a new language to require only a language server entry, with no code changes.
 
 ## Multi-Project Support
 
@@ -64,7 +64,7 @@ Tool calls are automatically routed to the correct project's language server bas
 
 ## Usage Statistics
 
-`symtrace-mcp` records tool call and language server lifecycle events in a per-project SQLite database at `.symtrace/stats.db`. Data is automatically deleted after 30 days.
+`symtrace-mcp` records tool call and language server lifecycle events in a per-project [Turso](https://github.com/tursodatabase/turso) database (SQLite-compatible) at `.symtrace/stats.db`. Data is automatically deleted after 30 days.
 
 View a summary of the last 7 days:
 
@@ -99,21 +99,6 @@ If no data has been collected yet:
 No stats data found.
 ```
 
-## Current Status
-
-**Phase 2 (Call Hierarchy)** — complete. Two MCP tools for call hierarchy traversal: `incoming_calls` (callers) and `outgoing_calls` (callees) via the callHierarchy protocol.
-
-**Phase 1 (Minimal Features)** — complete. Three MCP tools are available: `find_references`, `goto_definition`, and `find_implementations`. The server lazily starts rust-analyzer, manages open files with mtime tracking, and shuts down idle servers automatically. Multi-project support via `.symtrace.toml`.
-
-**Phase 0 (Foundation)** — complete.
-
-**Planned phases:**
-
-| Phase | Scope |
-|-------|-------|
-| **Phase 3: Multi-language** | TypeScript and Python support |
-| **Phase 4: Advanced Features** | `hover`, `diagnostics`, `rename` |
-
 ## Installation
 
 If you analyze Rust projects, you need to install `rust-analyzer` and ensure it's in your `PATH`.
@@ -126,18 +111,62 @@ rustup component add rust-src
 Clone the repository and install the server:
 
 ```bash
+cd symtrace-mcp
 cargo install --path .
 ```
 
 Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
 
+<details>
+  <summary>Claude Code example</summary>
+
 ```bash
-## Claude Code
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
 ```
 
+Disable the built-in `rust-analyzer-lsp` plugin to avoid running duplicate language server instances:
+
+```bash
+claude plugin disable rust-analyzer-lsp@claude-plugins-official
+```
+
+Or add the following to `~/.claude/settings.json`:
+
+```json
+{
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": false
+  }
+}
+```
+
+</details>
+
+### MCP Protocol
+
 The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes responses to stdout.
+
+## Roadmap
+
+| Item | Scope | Status |
+|------|-------|--------|
+| Foundation | MCP protocol, LSP transport, LSP process management | Complete |
+| Minimal Features | `find_references`, `goto_definition`, `find_implementations` | Complete |
+| Multi-Project Config | `.symtrace.toml`, per-project language servers | Complete |
+| Call Hierarchy | `incoming_calls`, `outgoing_calls` | Complete |
+| Usage Stats | Tool call tracking, stats CLI, SQLite-compatible storage | Complete |
+| Multi-language | TypeScript and Python support | Planned |
+| Advanced Features | `hover`, `diagnostics`, `rename` | Planned |
+| Installers & Upgrade | `curl \| sh` installer, Homebrew tap, `symtrace-mcp upgrade` | Planned |
+| Doctor Command | `symtrace-mcp doctor` — environment checks and prerequisite validation | Planned |
+| Stats Per Language | Group usage stats by language, schema migration | Planned |
 
 ## License
 
 [MIT](LICENSE)
+
+[deepwiki-badge]: https://deepwiki.com/badge.svg
+[gh-actions-badge]: https://github.com/tatsuya6502/symtrace-mcp/workflows/Test/badge.svg
+
+[deepwiki]: https://deepwiki.com/tatsuya6502/symtrace-mcp
+[gh-actions]: https://github.com/tatsuya6502/symtrace-mcp/actions?query=workflow%3ATest

@@ -4,6 +4,21 @@
 
 - Prefer `src/<module>.rs` + `src/<module>/sub.rs` over `src/<module>/mod.rs`. This project follows the Rust 2018+ module style.
 
+## Test & Lint
+
+```bash
+cargo clippy --all-targets --tests -- -D warnings
+cargo fmt --all -- --check
+cargo test
+```
+
+## CLI
+
+```bash
+symtrace-mcp              # Run as MCP server (stdio)
+symtrace-mcp stats        # Show usage stats for last 7 days
+```
+
 ## Configuration
 
 The server reads `.symtrace.toml` from CWD at startup. If absent, runs in single-project mode (CWD as root, default rust-analyzer config). Config format:
@@ -18,6 +33,10 @@ root = "project-a"
 [[projects]]
 root = "project-b"
 ```
+
+## OpenSpec
+
+Feature development follows an OpenSpec workflow. Specs live in `openspec/specs/` and changes in `openspec/changes/`. Each change has a `change.md` (scope + task list) and per-component spec deltas. Completed changes are archived to `openspec/changes/archive/`.
 
 ## PR Review Workflow
 

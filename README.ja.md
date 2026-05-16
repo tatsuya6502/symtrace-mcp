@@ -1,13 +1,13 @@
 # symtrace-mcp
 
-> [!CAUTION]
-> このプロジェクトは初期開発段階です。破壊的変更が予想されます。
+[![DeepWiki][deepwiki-badge]][deepwiki]
+[![GitHub Actions][gh-actions-badge]][gh-actions]
 
-AIコーディングエージェントとLanguage Server Protocolの橋渡しを行うMCP（Model Context Protocol）サーバーです。AIツールに代わって言語サーバープロセスを管理し、find-references、goto-definition、call-hierarchyトラバーサルなどの操作をstdio経由のMCPツールとして公開します。
+`symtrace-mcp`はAIコーディングエージェントとLanguage Server Protocolの橋渡しを行うMCP（Model Context Protocol）サーバーです。AIツールに代わって言語サーバープロセスを管理し、find-references、goto-definition、call-hierarchyトラバーサルなどの操作をstdio経由のMCPツールとして公開します。
 
 **遅延起動**と**自動アイドルシャットダウン**により、重い言語サーバープロセスはAIエージェントが深いコード解析を要求したときだけリソースを消費します。
 
-`ast-outline`などの既存のコード解析ツールを置き換えるものではなく、補完することを目的としています。
+`ast-outline`などの既存の軽量コード解析ツールを置き換えるものではなく、補完することを目的としています。
 
 ## symtrace-mcp と ast-outline の使い分け
 
@@ -39,7 +39,7 @@ symtrace-mcpはLanguage Server Protocolを介して言語サーバーと通信�
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | 計画中 |
 | Python | [pyright](https://github.com/microsoft/pyright) | 計画中 |
 
-言語サポートはプロジェクトごとに設定します。新しい言語の追加には言語サーバーのエントリだけで済み、コードの変更は不要です。
+言語サポートはプロジェクトごとに設定します。将来的には、言語サーバーのエントリを追加するだけで新しい言語に対応できるようにすることを目指しています。
 
 ## マルチプロジェクト対応
 
@@ -64,7 +64,7 @@ root = "project-b"
 
 ## 使用統計
 
-`symtrace-mcp`はツール呼び出しと言語サーバーのライフサイクルイベントをプロジェクトごとのSQLiteデータベース（`.symtrace/stats.db`）に記録します。データは30日後に自動的に削除されます。
+`symtrace-mcp`はツール呼び出しと言語サーバーのライフサイクルイベントをプロジェクトごとの[Turso](https://github.com/tursodatabase/turso)データベース（SQLite互換、`.symtrace/stats.db`）に記録します。データは30日後に自動的に削除されます。
 
 過去7日間のサマリーを表示します：
 
@@ -99,21 +99,6 @@ Language Servers:
 No stats data found.
 ```
 
-## 現在のステータス
-
-**フェーズ 2（コール階層）** — 完了。`incoming_calls`（呼び出し元）と`outgoing_calls`（呼び出し先）の2つのMCPツールがcallHierarchyプロトコル経由で利用可能です。
-
-**フェーズ 1（最小機能）** — 完了。`find_references`、`goto_definition`、`find_implementations`の3つのMCPツールが利用可能です。サーバーはrust-analyzerを遅延起動し、mtime追跡付きでオープンファイルを管理し、アイドル状態のサーバーを自動的にシャットダウンします。`.symtrace.toml`によるマルチプロジェクト対応も完了しています。
-
-**フェーズ 0（基盤）** — 完了。
-
-**計画中のフェーズ：**
-
-| フェーズ | スコープ |
-|-------|-------|
-| **フェーズ 3: マルチ言語** | TypeScriptおよびPython対応 |
-| **フェーズ 4: 高度な機能** | `hover`、`diagnostics`、`rename` |
-
 ## インストール
 
 Rustプロジェクトを解析する場合は、`rust-analyzer`をインストールして`PATH`に含まれるようにしてください。
@@ -131,13 +116,56 @@ cargo install --path .
 
 AIエージェントのツール設定に`symtrace-mcp`を追加し、実行可能ファイルのパスと必要な引数を指定します。
 
+<details>
+  <summary>Claude Code example</summary>
+
 ```bash
-## Claude Code
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
 ```
 
+重複する言語サーバーインスタンスの起動を防ぐため、組み込みの`rust-analyzer-lsp`プラグインを無効化してください：
+
+```bash
+claude plugin disable rust-analyzer-lsp@claude-plugins-official
+```
+
+または`~/.claude/settings.json`に以下を追加してください：
+
+```json
+{
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": false
+  }
+}
+```
+
+</details>
+
+### MCP Protocol
+
 サーバーはstdinから改行区切りのJSON-RPC 2.0メッセージを読み取り、stdoutにレスポンスを出力します。
+
+## ロードマップ
+
+| 項目 | スコープ | ステータス |
+|------|-------|--------|
+| 基盤 | MCPプロトコル、LSPトランスポート、LSPプロセス管理 | 完了 |
+| 最小機能 | `find_references`、`goto_definition`、`find_implementations` | 完了 |
+| マルチプロジェクト設定 | `.symtrace.toml`、プロジェクトごとの言語サーバー | 完了 |
+| コール階層 | `incoming_calls`、`outgoing_calls` | 完了 |
+| 使用統計 | ツール呼び出し追跡、統計CLI、SQLite互換ストレージ | 完了 |
+| マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
+| 高度な機能 | `hover`、`diagnostics`、`rename` | 計画中 |
+| インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
+| 診断コマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
+| 言語別統計 | 言語ごとの使用統計、スキーママイグレーション | 計画中 |
 
 ## ライセンス
 
 [MIT](LICENSE)
+
+[deepwiki-badge]: https://deepwiki.com/badge.svg
+[gh-actions-badge]: https://github.com/tatsuya6502/symtrace-mcp/workflows/Test/badge.svg
+
+[deepwiki]: https://deepwiki.com/tatsuya6502/symtrace-mcp
+[gh-actions]: https://github.com/tatsuya6502/symtrace-mcp/actions?query=workflow%3ATest
