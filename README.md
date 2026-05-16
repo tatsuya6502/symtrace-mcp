@@ -39,7 +39,7 @@ symtrace-mcp communicates with language servers via the Language Server Protocol
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | Planned |
 | Python | [pyright](https://github.com/microsoft/pyright) | Planned |
 
-Language support is configured per-project. Adding a new language requires only a language server entry — no code changes needed.
+Language support is configured per-project. The goal is for adding a new language to require only a language server entry, with no code changes.
 
 ## Multi-Project Support
 
@@ -116,15 +116,15 @@ cargo install --path .
 
 Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
 
+**Claude Code example**
+
 ```bash
-## Claude Code
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
 ```
 
-Disable the built-in `rust-analyzer-lsp` plugin to avoid conflicts:
+Disable the built-in `rust-analyzer-lsp` plugin to avoid running duplicate language server instances:
 
 ```bash
-## Claude Code
 claude plugin disable rust-analyzer-lsp@claude-plugins-official
 ```
 
@@ -138,6 +138,8 @@ Or add the following to `~/.claude/settings.json`:
 }
 ```
 
+**MCP Protocol**
+
 The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes responses to stdout.
 
 ## Roadmap
@@ -148,12 +150,14 @@ The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes r
 | Minimal Features | `find_references`, `goto_definition`, `find_implementations` | Complete |
 | Multi-Project Config | `.symtrace.toml`, per-project language servers | Complete |
 | Call Hierarchy | `incoming_calls`, `outgoing_calls` | Complete |
-| Usage Stats | Tool call tracking, stats CLI, Turso storage | Complete |
+| Usage Stats | Tool call tracking, stats CLI, SQLite storage\* | Complete |
 | Multi-language | TypeScript and Python support | Planned |
 | Advanced Features | `hover`, `diagnostics`, `rename` | Planned |
 | Installers & Upgrade | `curl \| sh` installer, Homebrew tap, `symtrace-mcp upgrade` | Planned |
 | Doctor Command | `symtrace-mcp doctor` — environment checks and prerequisite validation | Planned |
-| Stats Per Language | Group usage stats by language, Turso schema migration | Planned |
+| Stats Per Language | Group usage stats by language, schema migration | Planned |
+
+\* Using [Turso](https://github.com/tursodatabase/turso), a SQLite-compatible database.
 
 ## License
 

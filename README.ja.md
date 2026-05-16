@@ -39,7 +39,7 @@ symtrace-mcpはLanguage Server Protocolを介して言語サーバーと通信�
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | 計画中 |
 | Python | [pyright](https://github.com/microsoft/pyright) | 計画中 |
 
-言語サポートはプロジェクトごとに設定します。新しい言語の追加には言語サーバーのエントリだけで済み、コードの変更は不要です。
+言語サポートはプロジェクトごとに設定します。将来的には、言語サーバーのエントリを追加するだけで新しい言語に対応できるようにすることを目指しています。
 
 ## マルチプロジェクト対応
 
@@ -121,7 +121,7 @@ AIエージェントのツール設定に`symtrace-mcp`を追加し、実行可�
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
 ```
 
-競合を避けるため、組み込みの`rust-analyzer-lsp`プラグインを無効化してください：
+重複する言語サーバーインスタンスの起動を防ぐため、組み込みの`rust-analyzer-lsp`プラグインを無効化してください：
 
 ```bash
 ## Claude Code
@@ -148,12 +148,14 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 | 最小機能 | `find_references`、`goto_definition`、`find_implementations` | 完了 |
 | マルチプロジェクト設定 | `.symtrace.toml`、プロジェクトごとの言語サーバー | 完了 |
 | コール階層 | `incoming_calls`、`outgoing_calls` | 完了 |
-| 使用統計 | ツール呼び出し追跡、統計CLI、Tursoストレージ | 完了 |
+| 使用統計 | ツール呼び出し追跡、統計CLI、SQLiteストレージ\* | 完了 |
 | マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
 | 高度な機能 | `hover`、`diagnostics`、`rename` | 計画中 |
 | インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
 | ドクターコマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
-| 言語別統計 | 言語ごとの使用統計、Tursoスキーママイグレーション | 計画中 |
+| 言語別統計 | 言語ごとの使用統計、スキーママイグレーション | 計画中 |
+
+\* [Turso](https://github.com/tursodatabase/turso)（SQLite互換データベース）を使用
 
 ## ライセンス
 
