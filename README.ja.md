@@ -111,6 +111,8 @@ rustup component add rust-src
 リポジトリをクローンしてサーバーをインストールします：
 
 ```bash
+git clone https://github.com/tatsuya6502/symtrace-mcp.git
+cd symtrace-mcp
 cargo install --path .
 ```
 
@@ -140,6 +142,21 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 ```
 
 </details>
+
+### 組み込みLSPプラグインではなくsymtrace-mcpを選ぶ理由
+
+Claude Codeには[11言語に対応した組み込みLSPプラグイン](https://code.claude.com/docs/en/discover-plugins#code-intelligence)が付属しており、コードナビゲーションと自動診断を提供します。symtrace-mcpは組み込みプラグインにない機能を追加します：
+
+| | 組み込みLSPプラグイン | symtrace-mcp |
+|--|---------------------|--------------|
+| マルチプロジェクト | ワークスペースごとに1つのLSP | `.symtrace.toml`で複数プロジェクト対応 |
+| アイドルシャットダウン | なし — CLIプロセスの間ずっとサーバーが生存 | 10分間の非操作後に自動シャットダウン |
+| 使用統計 | なし | `symtrace-mcp stats` |
+| 対応ツール | Claude Codeのみ | MCP互換のAIツール全般 |
+| 自動診断 | 対応 | 計画中 |
+| 対応言語 | 11言語（C/C++、C#、Go、Java、Kotlin、Lua、PHP、Python、Rust、Swift、TS/JS） | Rustのみ（TS/Pythonは計画中） |
+
+Claude Codeで単一のRustプロジェクトを扱う場合、組み込みプラグインで十分かもしれません。マルチプロジェクト対応、アイドル時のリソース管理、使用統計が必要な場合や、Claude Code以外のAIツールも併用する場合にsymtrace-mcpをおすすめします。
 
 ### MCP Protocol
 
