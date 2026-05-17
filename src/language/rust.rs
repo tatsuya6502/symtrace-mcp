@@ -8,10 +8,13 @@ pub fn client_capabilities() -> Value {
             "references": { "dynamicRegistration": false },
             "definition": { "dynamicRegistration": false, "linkSupport": true },
             "implementation": { "dynamicRegistration": false },
-            "documentSymbol": { "dynamicRegistration": false }
+            "documentSymbol": { "dynamicRegistration": false },
+            "rename": { "dynamicRegistration": false, "prepareSupport": false },
+            "diagnostic": { "dynamicRegistration": false }
         },
         "workspace": {
-            "symbol": { "dynamicRegistration": false }
+            "symbol": { "dynamicRegistration": false },
+            "workspaceEdit": { "documentChanges": true }
         }
     })
 }

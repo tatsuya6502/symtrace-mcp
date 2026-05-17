@@ -14,6 +14,7 @@ use crate::project::registry::ProjectRegistry;
 use crate::stats::StatsRecorder;
 
 /// Error returned by tool handlers, carrying an MCP error code.
+#[derive(Debug)]
 pub struct ToolError {
     pub code: i64,
     pub message: String,
@@ -104,6 +105,24 @@ impl McpServer {
             "Find callees (outgoing calls) from the function or method at the given position.",
             handlers::outgoing_calls_schema(),
             tool_handler!(registry, handlers::outgoing_calls),
+        );
+        server.register_tool(
+            "hover",
+            "Show type information, documentation, and signature for the symbol at the given position.",
+            handlers::hover_schema(),
+            tool_handler!(registry, handlers::hover),
+        );
+        server.register_tool(
+            "diagnostics",
+            "Get errors and warnings for a file on demand via pull diagnostics.",
+            handlers::diagnostics_schema(),
+            tool_handler!(registry, handlers::diagnostics),
+        );
+        server.register_tool(
+            "rename",
+            "Preview all locations that would change if a symbol were renamed — preview only, no file mutation.",
+            handlers::rename_schema(),
+            tool_handler!(registry, handlers::rename),
         );
 
         server

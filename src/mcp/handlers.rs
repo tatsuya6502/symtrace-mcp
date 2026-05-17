@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use super::tools::ToolError;
 use crate::lsp::types::{CallHierarchyItem, Location, Position};
+use crate::lsp::types::{Diagnostic, TextEdit, WorkspaceEdit};
 use crate::project::registry::ProjectRegistry;
 use crate::server::manager::ManagerError;
 use crate::uri::uri_to_path;
@@ -38,6 +39,60 @@ pub fn outgoing_calls_schema() -> Value {
     call_hierarchy_schema(
         "Find callees (outgoing calls) from the function or method at the given position.",
     )
+}
+
+pub fn hover_schema() -> Value {
+    query_schema(
+        "Show type information, documentation, and signature for the symbol at the given position.",
+    )
+}
+
+pub fn diagnostics_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Absolute path to the source file"
+            },
+            "json": {
+                "type": "boolean",
+                "default": false,
+                "description": "Return JSON output instead of human-readable text"
+            }
+        },
+        "required": ["file_path"]
+    })
+}
+
+pub fn rename_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Absolute path to the source file"
+            },
+            "line": {
+                "type": "integer",
+                "description": "Line number (1-based)"
+            },
+            "column": {
+                "type": "integer",
+                "description": "Column number (1-based)"
+            },
+            "new_name": {
+                "type": "string",
+                "description": "The new name for the symbol"
+            },
+            "json": {
+                "type": "boolean",
+                "default": false,
+                "description": "Return JSON output instead of human-readable text"
+            }
+        },
+        "required": ["file_path", "line", "column", "new_name"]
+    })
 }
 
 fn query_schema(_description: &str) -> Value {
@@ -135,6 +190,268 @@ pub async fn outgoing_calls(
     params: Value,
 ) -> Result<Value, ToolError> {
     execute_call_hierarchy(registry, params, CallDirection::Outgoing).await
+}
+
+pub async fn hover(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Value, ToolError> {
+    let p = ToolParams::parse(&params)?;
+    let path = Path::new(&p.file_path);
+
+    if !path
+        .try_exists()
+        .map_err(|e| ToolError::invalid_params(format!("cannot check path {}: {e}", p.file_path)))?
+    {
+        return Err(ToolError::invalid_params(format!(
+            "file not found: {}",
+            p.file_path
+        )));
+    }
+    if !path.is_file() {
+        return Err(ToolError::invalid_params(format!(
+            "not a file: {}",
+            p.file_path
+        )));
+    }
+
+    let manager = registry
+        .get_manager_for_file(path)
+        .map_err(|e| ToolError::invalid_params(e.to_string()))?;
+    let (language, mut servers) = manager
+        .get_client_for_file(path)
+        .await
+        .map_err(|e| match e {
+            ManagerError::UnsupportedLanguage(_) => ToolError::invalid_params(e.to_string()),
+            ManagerError::StartupFailed(_) | ManagerError::ClientError(_) => {
+                ToolError::internal(e.to_string())
+            }
+        })?;
+    manager.monitor().touch(language).await;
+
+    let entry = servers.get_mut(&language).expect("server entry must exist");
+    let language_id = manager
+        .config_for(language)
+        .expect("config must exist")
+        .language_id;
+
+    let uri = entry
+        .file_manager
+        .ensure_open(&mut entry.client, path, language_id)
+        .await
+        .map_err(|e| ToolError::internal(e.to_string()))?;
+
+    let position = Position {
+        line: p.line.saturating_sub(1),
+        character: p.column.saturating_sub(1),
+    };
+
+    let result = entry
+        .client
+        .hover(&uri, position)
+        .await
+        .map_err(|e| ToolError::internal(e.to_string()))?;
+
+    let text = match result {
+        None => "No hover information available".into(),
+        Some(hover) if p.json => {
+            let mut obj = serde_json::Map::new();
+            obj.insert("contents".into(), hover.contents);
+            if let Some(range) = hover.range {
+                obj.insert("range".into(), serde_json::to_value(range).unwrap());
+            }
+            serde_json::to_string_pretty(&obj).unwrap()
+        }
+        Some(hover) => format_hover_text(&hover.contents),
+    };
+
+    Ok(mcp_tool_result(text))
+}
+
+pub async fn diagnostics(
+    registry: &Arc<ProjectRegistry>,
+    params: Value,
+) -> Result<Value, ToolError> {
+    let file_path = params
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::invalid_params("missing file_path"))?
+        .to_string();
+    let json = params
+        .get("json")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let path = Path::new(&file_path);
+    if !path
+        .try_exists()
+        .map_err(|e| ToolError::invalid_params(format!("cannot check path {}: {e}", file_path)))?
+    {
+        return Err(ToolError::invalid_params(format!(
+            "file not found: {}",
+            file_path
+        )));
+    }
+    if !path.is_file() {
+        return Err(ToolError::invalid_params(format!(
+            "not a file: {}",
+            file_path
+        )));
+    }
+
+    let manager = registry
+        .get_manager_for_file(path)
+        .map_err(|e| ToolError::invalid_params(e.to_string()))?;
+    let (language, mut servers) = manager
+        .get_client_for_file(path)
+        .await
+        .map_err(|e| match e {
+            ManagerError::UnsupportedLanguage(_) => ToolError::invalid_params(e.to_string()),
+            ManagerError::StartupFailed(_) | ManagerError::ClientError(_) => {
+                ToolError::internal(e.to_string())
+            }
+        })?;
+    manager.monitor().touch(language).await;
+
+    let entry = servers.get_mut(&language).expect("server entry must exist");
+    let language_id = manager
+        .config_for(language)
+        .expect("config must exist")
+        .language_id;
+
+    let uri = entry
+        .file_manager
+        .ensure_open(&mut entry.client, path, language_id)
+        .await
+        .map_err(|e| ToolError::internal(e.to_string()))?;
+
+    let diagnostics: Vec<Diagnostic> = entry
+        .client
+        .diagnostic(&uri)
+        .await
+        .map_err(|e| ToolError::internal(e.to_string()))?;
+
+    let text = if diagnostics.is_empty() {
+        "No diagnostics found".into()
+    } else if json {
+        let items: Vec<Value> = diagnostics
+            .iter()
+            .map(|d| {
+                let mut obj = serde_json::Map::new();
+                obj.insert("file_path".into(), Value::String(file_path.clone()));
+                obj.insert(
+                    "line".into(),
+                    Value::Number((d.range.start.line + 1).into()),
+                );
+                obj.insert(
+                    "column".into(),
+                    Value::Number((d.range.start.character + 1).into()),
+                );
+                if let Some(sev) = d.severity {
+                    obj.insert("severity".into(), severity_name(sev).into());
+                }
+                if let Some(code) = &d.code {
+                    obj.insert("code".into(), code.clone());
+                }
+                if let Some(src) = &d.source {
+                    obj.insert("source".into(), Value::String(src.clone()));
+                }
+                obj.insert("message".into(), Value::String(d.message.clone()));
+                Value::Object(obj)
+            })
+            .collect();
+        serde_json::to_string_pretty(&items).unwrap()
+    } else {
+        let mut lines: Vec<String> = diagnostics
+            .iter()
+            .map(|d| {
+                let sev = d.severity.map(severity_name).unwrap_or("unknown");
+                format!(
+                    "{}:{} [{}] {}",
+                    d.range.start.line + 1,
+                    d.range.start.character + 1,
+                    sev,
+                    d.message
+                )
+            })
+            .collect();
+        lines.push(format!("({} diagnostics)", diagnostics.len()));
+        lines.join("\n")
+    };
+
+    Ok(mcp_tool_result(text))
+}
+
+pub async fn rename(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Value, ToolError> {
+    let p = ToolParams::parse(&params)?;
+    let new_name = params
+        .get("new_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::invalid_params("missing new_name"))?
+        .trim()
+        .to_string();
+    if new_name.is_empty() {
+        return Err(ToolError::invalid_params("new_name must be non-empty"));
+    }
+
+    let path = Path::new(&p.file_path);
+    if !path
+        .try_exists()
+        .map_err(|e| ToolError::invalid_params(format!("cannot check path {}: {e}", p.file_path)))?
+    {
+        return Err(ToolError::invalid_params(format!(
+            "file not found: {}",
+            p.file_path
+        )));
+    }
+    if !path.is_file() {
+        return Err(ToolError::invalid_params(format!(
+            "not a file: {}",
+            p.file_path
+        )));
+    }
+
+    let manager = registry
+        .get_manager_for_file(path)
+        .map_err(|e| ToolError::invalid_params(e.to_string()))?;
+    let (language, mut servers) = manager
+        .get_client_for_file(path)
+        .await
+        .map_err(|e| match e {
+            ManagerError::UnsupportedLanguage(_) => ToolError::invalid_params(e.to_string()),
+            ManagerError::StartupFailed(_) | ManagerError::ClientError(_) => {
+                ToolError::internal(e.to_string())
+            }
+        })?;
+    manager.monitor().touch(language).await;
+
+    let entry = servers.get_mut(&language).expect("server entry must exist");
+    let language_id = manager
+        .config_for(language)
+        .expect("config must exist")
+        .language_id;
+
+    let uri = entry
+        .file_manager
+        .ensure_open(&mut entry.client, path, language_id)
+        .await
+        .map_err(|e| ToolError::internal(e.to_string()))?;
+
+    let position = Position {
+        line: p.line.saturating_sub(1),
+        character: p.column.saturating_sub(1),
+    };
+
+    let result = entry
+        .client
+        .rename(&uri, position, &new_name)
+        .await
+        .map_err(|e| ToolError::internal(e.to_string()))?;
+
+    let text = match result {
+        None => "No rename changes".into(),
+        Some(edit) if p.json => format_rename_json(&edit),
+        Some(edit) => format_rename_text(&edit),
+    };
+
+    Ok(mcp_tool_result(text))
 }
 
 // ---------------------------------------------------------------------------
@@ -591,4 +908,351 @@ fn mcp_tool_result(text: String) -> Value {
     serde_json::json!({
         "content": [{ "type": "text", "text": text }]
     })
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers for hover, diagnostics, rename
+// ---------------------------------------------------------------------------
+
+/// Normalize `Hover.contents` (which can be string, MarkupContent, MarkedString,
+/// or array thereof) into a single human-readable string.
+fn format_hover_text(contents: &Value) -> String {
+    match contents {
+        Value::String(s) => s.clone(),
+        Value::Object(map) => map
+            .get("value")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        Value::Array(items) => items
+            .iter()
+            .map(format_hover_text)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        _ => contents.to_string(),
+    }
+}
+
+fn severity_name(severity: i32) -> &'static str {
+    match severity {
+        1 => "error",
+        2 => "warning",
+        3 => "info",
+        4 => "hint",
+        _ => "unknown",
+    }
+}
+
+fn format_rename_text(edit: &WorkspaceEdit) -> String {
+    let mut lines = Vec::new();
+    let mut total_changes = 0usize;
+    let mut file_count = 0usize;
+
+    for (uri, edits) in collect_rename_edits(edit) {
+        file_count += 1;
+        let path = uri_to_path(&uri);
+        for te in &edits {
+            lines.push(format!(
+                "{}:{}:{}  →  {}",
+                path.display(),
+                te.range.start.line + 1,
+                te.range.start.character + 1,
+                te.new_text,
+            ));
+            total_changes += 1;
+        }
+    }
+
+    lines.push(format!(
+        "({} changes in {} files)",
+        total_changes, file_count
+    ));
+    lines.join("\n")
+}
+
+fn format_rename_json(edit: &WorkspaceEdit) -> String {
+    let mut changes_map = serde_json::Map::new();
+
+    for (uri, edits) in collect_rename_edits(edit) {
+        let path = uri_to_path(&uri).display().to_string();
+        let entries: Vec<Value> = edits
+            .iter()
+            .map(|te| {
+                serde_json::json!({
+                    "line": te.range.start.line + 1,
+                    "column": te.range.start.character + 1,
+                    "new_text": te.new_text,
+                })
+            })
+            .collect();
+        changes_map.insert(path, Value::Array(entries));
+    }
+
+    serde_json::to_string_pretty(&serde_json::json!({ "changes": changes_map })).unwrap()
+}
+
+/// Normalize both `changes` and `document_changes` from a `WorkspaceEdit`
+/// into a flat list of `(uri, Vec<TextEdit>)` pairs.
+fn collect_rename_edits(edit: &WorkspaceEdit) -> Vec<(String, Vec<TextEdit>)> {
+    let mut result: Vec<(String, Vec<TextEdit>)> = Vec::new();
+
+    if let Some(changes) = &edit.changes {
+        for (uri, edits) in changes {
+            result.push((uri.clone(), edits.clone()));
+        }
+    }
+
+    if let Some(Value::Array(docs)) = &edit.document_changes {
+        for doc in docs {
+            if let Some(uri) = doc
+                .get("textDocument")
+                .and_then(|td| td.get("uri"))
+                .and_then(|v| v.as_str())
+            {
+                let edits: Option<Vec<TextEdit>> = doc
+                    .get("edits")
+                    .and_then(|e| serde_json::from_value(e.clone()).ok());
+                if let Some(edits) = edits {
+                    result.push((uri.to_string(), edits));
+                }
+            }
+        }
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lsp::types::{Range, TextEdit};
+    use serde_json::json;
+
+    // --- format_hover_text ---
+
+    #[test]
+    fn hover_text_plain_string() {
+        assert_eq!(format_hover_text(&json!("hello")), "hello");
+    }
+
+    #[test]
+    fn hover_text_markup_content() {
+        let contents = json!({ "kind": "markdown", "value": "pub fn foo()" });
+        assert_eq!(format_hover_text(&contents), "pub fn foo()");
+    }
+
+    #[test]
+    fn hover_text_array_joins_with_blank_line() {
+        let contents = json!(["first", { "value": "second" }]);
+        assert_eq!(format_hover_text(&contents), "first\n\nsecond");
+    }
+
+    #[test]
+    fn hover_text_empty_strings_filtered() {
+        let contents = json!(["hello", "", { "value": "" }, "world"]);
+        assert_eq!(format_hover_text(&contents), "hello\n\nworld");
+    }
+
+    // --- severity_name ---
+
+    #[test]
+    fn severity_names() {
+        assert_eq!(severity_name(1), "error");
+        assert_eq!(severity_name(2), "warning");
+        assert_eq!(severity_name(3), "info");
+        assert_eq!(severity_name(4), "hint");
+        assert_eq!(severity_name(99), "unknown");
+    }
+
+    // --- format_rename_text ---
+
+    #[test]
+    fn rename_text_single_file() {
+        let edit = WorkspaceEdit {
+            changes: Some({
+                let mut map = HashMap::new();
+                map.insert(
+                    "file:///src/main.rs".into(),
+                    vec![TextEdit {
+                        range: Range {
+                            start: crate::lsp::types::Position {
+                                line: 9,
+                                character: 4,
+                            },
+                            end: crate::lsp::types::Position {
+                                line: 9,
+                                character: 7,
+                            },
+                        },
+                        new_text: "foo".into(),
+                    }],
+                );
+                map
+            }),
+            document_changes: None,
+        };
+        let text = format_rename_text(&edit);
+        assert!(text.contains("foo"));
+        assert!(text.contains("(1 changes in 1 files)"));
+    }
+
+    #[test]
+    fn rename_text_empty_edit() {
+        let edit = WorkspaceEdit {
+            changes: None,
+            document_changes: None,
+        };
+        let text = format_rename_text(&edit);
+        assert_eq!(text, "(0 changes in 0 files)");
+    }
+
+    // --- format_rename_json ---
+
+    #[test]
+    fn rename_json_output() {
+        let edit = WorkspaceEdit {
+            changes: Some({
+                let mut map = HashMap::new();
+                map.insert(
+                    "file:///src/main.rs".into(),
+                    vec![TextEdit {
+                        range: Range {
+                            start: crate::lsp::types::Position {
+                                line: 4,
+                                character: 7,
+                            },
+                            end: crate::lsp::types::Position {
+                                line: 4,
+                                character: 10,
+                            },
+                        },
+                        new_text: "bar".into(),
+                    }],
+                );
+                map
+            }),
+            document_changes: None,
+        };
+        let json_str = format_rename_json(&edit);
+        let parsed: Value = serde_json::from_str(&json_str).unwrap();
+        let changes = parsed.get("changes").unwrap().as_object().unwrap();
+        assert!(changes.len() == 1);
+        let entries = changes.values().next().unwrap().as_array().unwrap();
+        assert_eq!(entries[0]["line"], 5);
+        assert_eq!(entries[0]["column"], 8);
+        assert_eq!(entries[0]["new_text"], "bar");
+    }
+
+    // --- ToolParams parsing ---
+
+    #[test]
+    fn tool_params_valid() {
+        let params = json!({
+            "file_path": "/src/main.rs",
+            "line": 10,
+            "column": 5,
+            "json": true
+        });
+        let p = ToolParams::parse(&params).unwrap();
+        assert_eq!(p.file_path, "/src/main.rs");
+        assert_eq!(p.line, 10);
+        assert_eq!(p.column, 5);
+        assert!(p.json);
+    }
+
+    #[test]
+    fn tool_params_defaults_json_false() {
+        let params = json!({
+            "file_path": "/src/main.rs",
+            "line": 1,
+            "column": 1
+        });
+        let p = ToolParams::parse(&params).unwrap();
+        assert!(!p.json);
+    }
+
+    #[test]
+    fn tool_params_missing_field() {
+        let params = json!({ "file_path": "/src/main.rs" });
+        assert!(ToolParams::parse(&params).is_err());
+    }
+
+    // --- document_changes handling ---
+
+    #[test]
+    fn rename_text_document_changes() {
+        let edit = WorkspaceEdit {
+            changes: None,
+            document_changes: Some(json!([
+                {
+                    "textDocument": { "uri": "file:///src/lib.rs", "version": 3 },
+                    "edits": [
+                        { "range": { "start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 7} }, "newText": "baz" }
+                    ]
+                }
+            ])),
+        };
+        let text = format_rename_text(&edit);
+        assert!(text.contains("baz"));
+        assert!(text.contains("(1 changes in 1 files)"));
+    }
+
+    #[test]
+    fn rename_json_document_changes() {
+        let edit = WorkspaceEdit {
+            changes: None,
+            document_changes: Some(json!([
+                {
+                    "textDocument": { "uri": "file:///src/lib.rs", "version": 1 },
+                    "edits": [
+                        { "range": { "start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 3} }, "newText": "qux" }
+                    ]
+                }
+            ])),
+        };
+        let json_str = format_rename_json(&edit);
+        let parsed: Value = serde_json::from_str(&json_str).unwrap();
+        let changes = parsed.get("changes").unwrap().as_object().unwrap();
+        let entries = changes.values().next().unwrap().as_array().unwrap();
+        assert_eq!(entries[0]["new_text"], "qux");
+    }
+
+    #[test]
+    fn rename_both_changes_and_document_changes() {
+        let edit = WorkspaceEdit {
+            changes: Some({
+                let mut map = HashMap::new();
+                map.insert(
+                    "file:///src/a.rs".into(),
+                    vec![TextEdit {
+                        range: Range {
+                            start: crate::lsp::types::Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: crate::lsp::types::Position {
+                                line: 0,
+                                character: 3,
+                            },
+                        },
+                        new_text: "x".into(),
+                    }],
+                );
+                map
+            }),
+            document_changes: Some(json!([
+                {
+                    "textDocument": { "uri": "file:///src/b.rs", "version": 1 },
+                    "edits": [
+                        { "range": { "start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 3} }, "newText": "y" }
+                    ]
+                }
+            ])),
+        };
+        let text = format_rename_text(&edit);
+        assert!(text.contains("x"));
+        assert!(text.contains("y"));
+        assert!(text.contains("(2 changes in 2 files)"));
+    }
 }

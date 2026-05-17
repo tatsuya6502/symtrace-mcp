@@ -23,7 +23,9 @@
 | **Rust トレイト実装の解決** | **`symtrace-mcp find_implementations`** |
 | **定義へのジャンプ（型解決付き）** | **`symtrace-mcp goto_definition`** |
 | **コール階層** | **`symtrace-mcp incoming_calls`** / **`outgoing_calls`** |
-| **型情報 / ホバー** | **`symtrace-mcp hover`** *(計画中)* |
+| **型情報 / ホバー** | **`symtrace-mcp hover`** |
+| **プル診断** | **`symtrace-mcp diagnostics`** |
+| **リネームプレビュー** | **`symtrace-mcp rename`** |
 
 `symtrace-mcp`への最初のツール呼び出しでバックグラウンドで言語サーバーが起動します。以降の呼び出しは稼働中のサーバーを再利用します。サーバーは10分間操作がないと自動的にシャットダウンします。
 
@@ -153,7 +155,7 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 | アイドルシャットダウン | なし — CLIプロセスの間ずっとサーバーが生存 | 10分間の非操作後に自動シャットダウン |
 | 使用統計 | なし | `symtrace-mcp stats` |
 | 対応ツール | Claude Codeのみ | MCP互換のAIツール全般 |
-| 自動診断 | 対応 | 計画中 |
+| 自動診断 | 対応 | プル診断（`diagnostics`ツール） |
 | 対応言語 | 11言語（C/C++、C#、Go、Java、Kotlin、Lua、PHP、Python、Rust、Swift、TS/JS） | Rustのみ（TS/Pythonは計画中） |
 
 Claude Codeで単一のRustプロジェクトを扱う場合、組み込みプラグインで十分かもしれません。マルチプロジェクト対応、アイドル時のリソース管理、使用統計が必要な場合や、Claude Code以外のAIツールも併用する場合にsymtrace-mcpをおすすめします。
@@ -172,7 +174,7 @@ Claude Codeで単一のRustプロジェクトを扱う場合、組み込みプ�
 | コール階層 | `incoming_calls`、`outgoing_calls` | 完了 |
 | 使用統計 | ツール呼び出し追跡、統計CLI、SQLite互換ストレージ | 完了 |
 | マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
-| 高度な機能 | `hover`、`diagnostics`、`rename` | 計画中 |
+| 高度な機能 | `hover`、`diagnostics`、`rename` | 完了 |
 | インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
 | 診断コマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
 | 言語別統計 | 言語ごとの使用統計、スキーママイグレーション | 計画中 |

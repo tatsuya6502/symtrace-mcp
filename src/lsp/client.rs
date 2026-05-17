@@ -264,9 +264,116 @@ impl LspClient {
         Ok(parse_location_list(&result))
     }
 
+    pub async fn hover(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Option<super::types::Hover>, ClientError> {
+        if !provider_enabled(&self.capabilities.hover_provider) {
+            return Err(ClientError::Protocol(
+                "language server does not support hover".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/hover",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let hover: super::types::Hover = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse Hover: {e}")))?;
+
+        Ok(Some(hover))
+    }
+
+    pub async fn diagnostic(
+        &self,
+        uri: &str,
+    ) -> Result<Vec<super::types::Diagnostic>, ClientError> {
+        if !provider_enabled(&self.capabilities.diagnostic_provider) {
+            return Err(ClientError::Protocol(
+                "language server does not support pull diagnostics".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/diagnostic",
+                serde_json::json!({
+                    "textDocument": { "uri": uri }
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
+
+        // LSP can return either FullDocumentDiagnosticReport (with items)
+        // or UnchangedDocumentDiagnosticReport (no items field). Since we
+        // don't track result IDs, unchanged reports yield an empty list.
+        #[derive(serde::Deserialize)]
+        struct DiagnosticReport {
+            items: Option<Vec<super::types::Diagnostic>>,
+        }
+
+        let report: DiagnosticReport = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse DiagnosticReport: {e}")))?;
+
+        Ok(report.items.unwrap_or_default())
+    }
+
+    pub async fn rename(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+        new_name: &str,
+    ) -> Result<Option<super::types::WorkspaceEdit>, ClientError> {
+        if !provider_enabled(&self.capabilities.rename_provider) {
+            return Err(ClientError::Protocol(
+                "language server does not support rename".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/rename",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                    "newName": new_name,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let edit: super::types::WorkspaceEdit = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse WorkspaceEdit: {e}")))?;
+
+        Ok(Some(edit))
+    }
+
     /// Check whether the language server supports the callHierarchy protocol.
     fn call_hierarchy_supported(&self) -> bool {
-        self.capabilities.call_hierarchy_provider.is_some()
+        provider_enabled(&self.capabilities.call_hierarchy_provider)
     }
 
     /// Send `textDocument/prepareCallHierarchy` and return prepared items.
@@ -440,4 +547,38 @@ fn parse_location_list(value: &Value) -> Vec<super::types::Location> {
         }
     }
     locations
+}
+
+/// Check if a provider capability is enabled.
+/// LSP allows `true`, `false`, or an object (e.g. `{"documentSelector": ...}`).
+/// Both `None` (missing) and `Some(false)` mean the capability is disabled.
+fn provider_enabled(provider: &Option<Value>) -> bool {
+    match provider {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => true, // object form means enabled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_enabled_none() {
+        assert!(!provider_enabled(&None));
+    }
+
+    #[test]
+    fn provider_enabled_bool() {
+        assert!(provider_enabled(&Some(Value::Bool(true))));
+        assert!(!provider_enabled(&Some(Value::Bool(false))));
+    }
+
+    #[test]
+    fn provider_enabled_object() {
+        assert!(provider_enabled(&Some(
+            serde_json::json!({ "documentSelector": [] })
+        )));
+    }
 }
