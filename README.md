@@ -111,6 +111,7 @@ rustup component add rust-src
 Clone the repository and install the server:
 
 ```bash
+git clone https://github.com/tatsuya6502/symtrace-mcp.git
 cd symtrace-mcp
 cargo install --path .
 ```
@@ -141,6 +142,21 @@ Or add the following to `~/.claude/settings.json`:
 ```
 
 </details>
+
+### Why symtrace-mcp over built-in LSP plugins? *(as of May 2026)*
+
+As of May 2026, Claude Code includes [built-in LSP plugins for 11 languages](https://code.claude.com/docs/en/discover-plugins#code-intelligence) that provide code navigation and auto-diagnostics. symtrace-mcp adds features the built-in plugins lack:
+
+| | Built-in LSP Plugins | symtrace-mcp |
+|--|---------------------|--------------|
+| Multi-project | One LSP per workspace | Multiple projects via `.symtrace.toml` |
+| Idle shutdown | None — servers stay alive for the entire CLI process | Automatic after 10 min inactivity |
+| Usage analytics | No | `symtrace-mcp stats` |
+| Works with | Claude Code only | Any MCP-compatible AI tool |
+| Auto-diagnostics | Yes | Planned |
+| Languages | 11 (C/C++, C#, Go, Java, Kotlin, Lua, PHP, Python, Rust, Swift, TS/JS) | Rust only (TS/Python planned) |
+
+If you work on a single Rust project in Claude Code, the built-in plugin may be enough. symtrace-mcp is worth using when you need multi-project support, idle resource management, or usage tracking — or when you use AI tools beyond Claude Code.
 
 ### MCP Protocol
 
