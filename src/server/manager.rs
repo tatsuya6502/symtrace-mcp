@@ -14,6 +14,7 @@ use crate::stats::StatsRecorder;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
     Rust,
+    TypeScript,
 }
 
 /// Configuration for a single language server.
@@ -27,7 +28,7 @@ pub struct LanguageServerConfig {
     pub idle_timeout_secs: u64,
 }
 
-/// Default configs for P1 (Rust only).
+/// Default configs for Rust and TypeScript.
 fn default_configs() -> HashMap<Language, LanguageServerConfig> {
     let mut map = HashMap::new();
     map.insert(
@@ -38,6 +39,17 @@ fn default_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec![],
             extensions: vec!["rs"],
             language_id: "rust",
+            idle_timeout_secs: 600,
+        },
+    );
+    map.insert(
+        Language::TypeScript,
+        LanguageServerConfig {
+            language: Language::TypeScript,
+            command: "typescript-language-server".to_string(),
+            args: vec!["--stdio".to_string()],
+            extensions: vec!["ts", "tsx", "js", "jsx"],
+            language_id: "typescript",
             idle_timeout_secs: 600,
         },
     );
@@ -186,6 +198,7 @@ impl LanguageServerManager {
 
         let capabilities = match language {
             Language::Rust => crate::language::rust::client_capabilities(),
+            Language::TypeScript => crate::language::typescript::client_capabilities(),
         };
 
         let start = std::time::Instant::now();
@@ -288,4 +301,54 @@ impl LanguageServerManager {
 
 fn args_from(cfg: &LanguageServerConfig) -> Vec<&str> {
     cfg.args.iter().map(|s| s.as_str()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_stats() -> (tempfile::TempDir, Arc<StatsRecorder>) {
+        let dir = tempfile::tempdir().unwrap();
+        let recorder = StatsRecorder::new(dir.path()).await.unwrap();
+        (dir, Arc::new(recorder))
+    }
+
+    #[test]
+    fn typescript_default_config() {
+        let configs = default_configs();
+        let ts = configs
+            .get(&Language::TypeScript)
+            .expect("TypeScript config must exist");
+        assert_eq!(ts.command, "typescript-language-server");
+        assert_eq!(ts.args, vec!["--stdio"]);
+        assert_eq!(ts.extensions, vec!["ts", "tsx", "js", "jsx"]);
+        assert_eq!(ts.language_id, "typescript");
+        assert_eq!(ts.idle_timeout_secs, 600);
+    }
+
+    #[tokio::test]
+    async fn ts_file_resolves_to_typescript() {
+        let configs = default_configs();
+        let manager = LanguageServerManager::with_configs(
+            PathBuf::from("/tmp/test"),
+            configs,
+            test_stats().await.1,
+        );
+        assert_eq!(
+            manager.language_for_file(Path::new("app.ts")),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            manager.language_for_file(Path::new("App.tsx")),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            manager.language_for_file(Path::new("utils.js")),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            manager.language_for_file(Path::new("Component.jsx")),
+            Some(Language::TypeScript)
+        );
+    }
 }

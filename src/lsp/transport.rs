@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 // --- Error type ---
 
@@ -47,7 +47,11 @@ pub struct LspTransport {
 
 impl LspTransport {
     /// Spawn a language server child process and create the transport.
-    pub async fn spawn(command: &str, args: &[&str]) -> Result<Self, LspError> {
+    /// Returns the transport and a receiver for server notifications.
+    pub async fn spawn(
+        command: &str,
+        args: &[&str],
+    ) -> Result<(Self, mpsc::UnboundedReceiver<(String, Value)>), LspError> {
         let mut child = Command::new(command)
             .args(args)
             .stdin(std::process::Stdio::piped())
@@ -69,6 +73,7 @@ impl LspTransport {
         let pending: PendingMap = Arc::new(std::sync::Mutex::new(HashMap::new()));
         let child = Arc::new(Mutex::new(child));
         let closed = Arc::new(AtomicBool::new(false));
+        let (notification_tx, notification_rx) = mpsc::unbounded_channel();
 
         let reader_handle = tokio::spawn(reader_task(
             BufReader::new(stdout),
@@ -76,16 +81,20 @@ impl LspTransport {
             child.clone(),
             writer.clone(),
             closed.clone(),
+            notification_tx,
         ));
 
-        Ok(Self {
-            writer,
-            pending,
-            next_id: AtomicI64::new(1),
-            child,
-            _reader_handle: reader_handle,
-            closed,
-        })
+        Ok((
+            Self {
+                writer,
+                pending,
+                next_id: AtomicI64::new(1),
+                child,
+                _reader_handle: reader_handle,
+                closed,
+            },
+            notification_rx,
+        ))
     }
 
     /// Send a JSON-RPC request and await the response (3.4).
@@ -152,6 +161,7 @@ async fn reader_task(
     child: Arc<Mutex<Child>>,
     writer: Arc<Mutex<BufWriter<ChildStdin>>>,
     closed: Arc<AtomicBool>,
+    notification_tx: mpsc::UnboundedSender<(String, Value)>,
 ) {
     loop {
         let msg = match read_message(&mut reader).await {
@@ -198,7 +208,11 @@ async fn reader_task(
                 let _ = write_message(&writer, &response).await;
             }
         } else if let Some(method) = msg.get("method").and_then(|v| v.as_str()) {
-            eprintln!("[lsp] server notification: {method}");
+            let params = msg
+                .get("params")
+                .cloned()
+                .unwrap_or(Value::Object(Default::default()));
+            let _ = notification_tx.send((method.to_string(), params));
         }
     }
 

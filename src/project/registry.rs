@@ -140,11 +140,16 @@ impl ProjectRegistry {
         let mut configs = default_server_configs();
 
         for (lang_name, cfg) in server_section {
-            if lang_name == "rust"
-                && let Some(rust_cfg) = configs.get_mut(&Language::Rust)
+            let target = match lang_name.as_str() {
+                "rust" => Some(Language::Rust),
+                "typescript" => Some(Language::TypeScript),
+                _ => None,
+            };
+            if let Some(lang) = target
+                && let Some(lang_cfg) = configs.get_mut(&lang)
             {
-                rust_cfg.command = cfg.command.clone();
-                rust_cfg.idle_timeout_secs = cfg.idle_timeout_secs;
+                lang_cfg.command = cfg.command.clone();
+                lang_cfg.idle_timeout_secs = cfg.idle_timeout_secs;
             }
         }
 
@@ -162,6 +167,17 @@ fn default_server_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec![],
             extensions: vec!["rs"],
             language_id: "rust",
+            idle_timeout_secs: 600,
+        },
+    );
+    map.insert(
+        Language::TypeScript,
+        LanguageServerConfig {
+            language: Language::TypeScript,
+            command: "typescript-language-server".to_string(),
+            args: vec!["--stdio".to_string()],
+            extensions: vec!["ts", "tsx", "js", "jsx"],
+            language_id: "typescript",
             idle_timeout_secs: 600,
         },
     );

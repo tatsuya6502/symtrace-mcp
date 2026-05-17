@@ -150,4 +150,32 @@ command = "/custom/rust-analyzer"
         assert_eq!(config.projects[0].root, cwd);
         assert!(config.server.is_empty());
     }
+
+    #[test]
+    fn load_typescript_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        let mut f = std::fs::File::create(&config_path).unwrap();
+        write!(
+            f,
+            r#"
+[server.rust]
+command = "rust-analyzer"
+
+[server.typescript]
+command = "typescript-language-server"
+
+[[projects]]
+root = "my-project"
+"#
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert_eq!(config.server["rust"].command, "rust-analyzer");
+        assert_eq!(
+            config.server["typescript"].command,
+            "typescript-language-server"
+        );
+    }
 }

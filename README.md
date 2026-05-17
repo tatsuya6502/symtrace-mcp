@@ -38,7 +38,7 @@ symtrace-mcp communicates with language servers via the Language Server Protocol
 | Language | Language Server | Status |
 |----------|----------------|--------|
 | Rust | [rust-analyzer](https://rust-analyzer.github.io/) | Supported |
-| TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | Planned |
+| TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | Supported |
 | Python | [pyright](https://github.com/microsoft/pyright) | Planned |
 
 Language support is configured per-project. The goal is for adding a new language to require only a language server entry, with no code changes.
@@ -51,6 +51,9 @@ symtrace-mcp can manage multiple independent projects in a single repository, ea
 [server.rust]
 command = "rust-analyzer"
 
+[server.typescript]
+command = "typescript-language-server"
+
 [[projects]]
 root = "project-a"
 
@@ -60,6 +63,7 @@ root = "project-b"
 
 - `[[projects]]` — List of project root directories (relative to the config file). Each gets its own language server.
 - `[server.rust]` — Global language server configuration. Optional; defaults to `rust-analyzer` with a 600s idle timeout.
+- `[server.typescript]` — TypeScript language server configuration. Optional; defaults to `typescript-language-server --stdio` with a 600s idle timeout.
 - If `.symtrace.toml` is absent, the server runs in single-project mode using the current directory as the project root.
 
 Tool calls are automatically routed to the correct project's language server based on the file path (longest-prefix match).
@@ -103,11 +107,17 @@ No stats data found.
 
 ## Installation
 
-If you analyze Rust projects, you need to install `rust-analyzer` and ensure it's in your `PATH`.
+### Prerequisites
+
+Install the language servers for the languages you work with:
 
 ```bash
+# Rust
 rustup component add rust-analyzer
 rustup component add rust-src
+
+# TypeScript / JavaScript
+npm install -g typescript-language-server typescript
 ```
 
 Clone the repository and install the server:
@@ -155,8 +165,8 @@ As of May 2026, Claude Code includes [built-in LSP plugins for 11 languages](htt
 | Idle shutdown | None — servers stay alive for the entire CLI process | Automatic after 10 min inactivity |
 | Usage analytics | No | `symtrace-mcp stats` |
 | Works with | Claude Code only | Any MCP-compatible AI tool |
-| Auto-diagnostics | Yes | Pull diagnostics (`diagnostics` tool) |
-| Languages | 11 (C/C++, C#, Go, Java, Kotlin, Lua, PHP, Python, Rust, Swift, TS/JS) | Rust only (TS/Python planned) |
+| Auto-diagnostics | Yes | Pull and push diagnostics (`diagnostics` tool) |
+| Languages | 11 (C/C++, C#, Go, Java, Kotlin, Lua, PHP, Python, Rust, Swift, TS/JS) | Rust, TypeScript/JS (Python planned) |
 
 If you work on a single Rust project in Claude Code, the built-in plugin may be enough. symtrace-mcp is worth using when you need multi-project support, idle resource management, or usage tracking — or when you use AI tools beyond Claude Code.
 
@@ -173,7 +183,9 @@ The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes r
 | Multi-Project Config | `.symtrace.toml`, per-project language servers | Complete |
 | Call Hierarchy | `incoming_calls`, `outgoing_calls` | Complete |
 | Usage Stats | Tool call tracking, stats CLI, SQLite-compatible storage | Complete |
-| Multi-language | TypeScript and Python support | Planned |
+| Multi-language | TypeScript support | Complete |
+| Multi-language | Python support | Planned |
+| Multi-language | Kotlin support | Planned |
 | Advanced Features | `hover`, `diagnostics`, `rename` | Complete |
 | Installers & Upgrade | `curl \| sh` installer, Homebrew tap, `symtrace-mcp upgrade` | Planned |
 | Doctor Command | `symtrace-mcp doctor` — environment checks and prerequisite validation | Planned |
