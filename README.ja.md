@@ -38,7 +38,7 @@ symtrace-mcpはLanguage Server Protocolを介して言語サーバーと通信�
 | 言語 | 言語サーバー | ステータス |
 |----------|----------------|--------|
 | Rust | [rust-analyzer](https://rust-analyzer.github.io/) | 対応済み |
-| TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | 計画中 |
+| TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | 対応済み |
 | Python | [pyright](https://github.com/microsoft/pyright) | 計画中 |
 
 言語サポートはプロジェクトごとに設定します。将来的には、言語サーバーのエントリを追加するだけで新しい言語に対応できるようにすることを目指しています。
@@ -51,6 +51,9 @@ symtrace-mcpは単一リポジトリ内の複数の独立したプロジェク�
 [server.rust]
 command = "rust-analyzer"
 
+[server.typescript]
+command = "typescript-language-server"
+
 [[projects]]
 root = "project-a"
 
@@ -60,6 +63,7 @@ root = "project-b"
 
 - `[[projects]]` — プロジェクトルートディレクトリのリスト（設定ファイルからの相対パス）。それぞれに専用の言語サーバーが割り当てられます。
 - `[server.rust]` — グローバルな言語サーバー設定。省略可能。デフォルトは`rust-analyzer`、アイドルタイムアウト600秒。
+- `[server.typescript]` — TypeScript言語サーバー設定。省略可能。デフォルトは`typescript-language-server --stdio`、アイドルタイムアウト600秒。
 - `.symtrace.toml`がない場合、サーバーは現在のディレクトリをプロジェクトルートとしてシングルプロジェクトモードで動作します。
 
 ツール呼び出しはファイルパスに基づいて自動的に正しいプロジェクトの言語サーバーにルーティングされます（最長プレフィックスマッチ）。
@@ -103,11 +107,17 @@ No stats data found.
 
 ## インストール
 
-Rustプロジェクトを解析する場合は、`rust-analyzer`をインストールして`PATH`に含まれるようにしてください。
+### 前提条件
+
+使用する言語の言語サーバーをインストールしてください：
 
 ```bash
+# Rust
 rustup component add rust-analyzer
 rustup component add rust-src
+
+# TypeScript / JavaScript
+npm install -g typescript-language-server typescript
 ```
 
 リポジトリをクローンしてサーバーをインストールします：
@@ -155,8 +165,8 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 | アイドルシャットダウン | なし — CLIプロセスの間ずっとサーバーが生存 | 10分間の非操作後に自動シャットダウン |
 | 使用統計 | なし | `symtrace-mcp stats` |
 | 対応ツール | Claude Codeのみ | MCP互換のAIツール全般 |
-| 自動診断 | 対応 | プル診断（`diagnostics`ツール） |
-| 対応言語 | 11言語（C/C++、C#、Go、Java、Kotlin、Lua、PHP、Python、Rust、Swift、TS/JS） | Rustのみ（TS/Pythonは計画中） |
+| 自動診断 | 対応 | プル診断およびプッシュ診断（`diagnostics`ツール） |
+| 対応言語 | 11言語（C/C++、C#、Go、Java、Kotlin、Lua、PHP、Python、Rust、Swift、TS/JS） | Rust、TypeScript/JS（Pythonは計画中） |
 
 Claude Codeで単一のRustプロジェクトを扱う場合、組み込みプラグインで十分かもしれません。マルチプロジェクト対応、アイドル時のリソース管理、使用統計が必要な場合や、Claude Code以外のAIツールも併用する場合にsymtrace-mcpをおすすめします。
 
@@ -173,7 +183,9 @@ Claude Codeで単一のRustプロジェクトを扱う場合、組み込みプ�
 | マルチプロジェクト設定 | `.symtrace.toml`、プロジェクトごとの言語サーバー | 完了 |
 | コール階層 | `incoming_calls`、`outgoing_calls` | 完了 |
 | 使用統計 | ツール呼び出し追跡、統計CLI、SQLite互換ストレージ | 完了 |
-| マルチ言語 | TypeScriptおよびPython対応 | 計画中 |
+| マルチ言語 | TypeScript対応 | 完了 |
+| マルチ言語 | Python対応 | 計画中 |
+| マルチ言語 | Kotlin対応 | 計画中 |
 | 高度な機能 | `hover`、`diagnostics`、`rename` | 完了 |
 | インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
 | 診断コマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |

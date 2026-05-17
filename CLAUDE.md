@@ -21,11 +21,14 @@ symtrace-mcp stats        # Show usage stats for last 7 days
 
 ## Configuration
 
-The server reads `.symtrace.toml` from CWD at startup. If absent, runs in single-project mode (CWD as root, default rust-analyzer config). Config format:
+The server reads `.symtrace.toml` from CWD at startup. If absent, runs in single-project mode (CWD as root, default Rust and TypeScript server configs). Config format:
 
 ```toml
 [server.rust]
 command = "rust-analyzer"
+
+[server.typescript]
+command = "typescript-language-server"
 
 [[projects]]
 root = "project-a"

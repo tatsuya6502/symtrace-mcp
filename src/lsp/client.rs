@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::Duration;
 
+use moka::future::Cache;
 use serde_json::Value;
 
 use super::transport::LspTransport;
-use super::types::ServerCapabilities;
+use super::types::{Diagnostic, ServerCapabilities};
 use crate::uri::path_to_uri;
 
 /// Error type for LSP client operations.
@@ -34,6 +36,7 @@ pub struct LspClient {
     root_uri: String,
     open_files: HashSet<String>,
     capabilities: ServerCapabilities,
+    diagnostics_cache: Cache<String, Vec<Diagnostic>>,
 }
 
 impl LspClient {
@@ -48,7 +51,7 @@ impl LspClient {
         client_capabilities: Value,
     ) -> Result<Self, ClientError> {
         let root_uri = path_to_uri(root);
-        let transport = LspTransport::spawn(command, args)
+        let (transport, mut notification_rx) = LspTransport::spawn(command, args)
             .await
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
@@ -74,11 +77,32 @@ impl LspClient {
             .await
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
+        let diagnostics_cache: Cache<String, Vec<Diagnostic>> = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .build();
+
+        // Spawn background task to process server notifications.
+        let cache = diagnostics_cache.clone();
+        tokio::spawn(async move {
+            while let Some((method, params)) = notification_rx.recv().await {
+                if method == "textDocument/publishDiagnostics"
+                    && let Some(uri) = params.get("uri").and_then(|v| v.as_str())
+                {
+                    let diags = params
+                        .get("diagnostics")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default();
+                    cache.insert(uri.to_string(), diags).await;
+                }
+            }
+        });
+
         Ok(Self {
             transport,
             root_uri,
             open_files: HashSet::new(),
             capabilities: init_result.capabilities,
+            diagnostics_cache,
         })
     }
 
@@ -134,6 +158,7 @@ impl LspClient {
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
         self.open_files.insert(uri.to_string());
+        self.diagnostics_cache.invalidate(uri).await;
         Ok(())
     }
 
@@ -158,6 +183,7 @@ impl LspClient {
             .await
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
+        self.diagnostics_cache.invalidate(uri).await;
         Ok(())
     }
 
@@ -302,9 +328,8 @@ impl LspClient {
         uri: &str,
     ) -> Result<Vec<super::types::Diagnostic>, ClientError> {
         if !provider_enabled(&self.capabilities.diagnostic_provider) {
-            return Err(ClientError::Protocol(
-                "language server does not support pull diagnostics".into(),
-            ));
+            // Server does not support pull diagnostics — read from push cache.
+            return Ok(self.diagnostics_cache.get(uri).await.unwrap_or_default());
         }
 
         let result = self
@@ -563,6 +588,7 @@ fn provider_enabled(provider: &Option<Value>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn provider_enabled_none() {
@@ -580,5 +606,140 @@ mod tests {
         assert!(provider_enabled(&Some(
             serde_json::json!({ "documentSelector": [] })
         )));
+    }
+
+    #[tokio::test]
+    async fn notification_updates_diagnostics_cache() {
+        let cache: Cache<String, Vec<Diagnostic>> = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .build();
+
+        // Simulate a publishDiagnostics notification.
+        let diags = vec![Diagnostic {
+            range: super::super::types::Range {
+                start: super::super::types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: super::super::types::Position {
+                    line: 0,
+                    character: 5,
+                },
+            },
+            severity: Some(1),
+            code: None,
+            source: None,
+            message: "test error".into(),
+        }];
+        cache
+            .insert("file:///test.ts".to_string(), diags.clone())
+            .await;
+
+        let cached = cache.get(&"file:///test.ts".to_string()).await;
+        assert_eq!(cached.as_ref().unwrap().len(), 1);
+        assert_eq!(cached.as_ref().unwrap()[0].message, "test error");
+    }
+
+    #[tokio::test]
+    async fn cache_miss_returns_empty() {
+        let cache: Cache<String, Vec<Diagnostic>> = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .build();
+
+        let result = cache.get(&"file:///nonexistent.ts".to_string()).await;
+        assert!(result.is_none());
+        assert!(result.unwrap_or_default().is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalidate_on_did_change() {
+        let cache: Cache<String, Vec<Diagnostic>> = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .build();
+
+        let uri = "file:///test.ts".to_string();
+        cache
+            .insert(
+                uri.clone(),
+                vec![Diagnostic {
+                    range: super::super::types::Range {
+                        start: super::super::types::Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: super::super::types::Position {
+                            line: 0,
+                            character: 5,
+                        },
+                    },
+                    severity: Some(1),
+                    code: None,
+                    source: None,
+                    message: "old error".into(),
+                }],
+            )
+            .await;
+
+        // Simulate didChange invalidation.
+        cache.invalidate(&uri).await;
+
+        let result = cache.get(&uri).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn invalidate_only_target_uri() {
+        let cache: Cache<String, Vec<Diagnostic>> = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .build();
+
+        let uri_a = "file:///App.tsx".to_string();
+        let uri_b = "file:///utils.ts".to_string();
+
+        cache.insert(uri_a.clone(), vec![]).await;
+        cache.insert(uri_b.clone(), vec![]).await;
+
+        // Invalidate only uri_a.
+        cache.invalidate(&uri_a).await;
+
+        assert!(cache.get(&uri_a).await.is_none());
+        assert!(cache.get(&uri_b).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn invalidate_on_did_open() {
+        let cache: Cache<String, Vec<Diagnostic>> = Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .build();
+
+        let uri = "file:///new-file.ts".to_string();
+        // Pre-populate with stale data (e.g., from a previous session).
+        cache
+            .insert(
+                uri.clone(),
+                vec![Diagnostic {
+                    range: super::super::types::Range {
+                        start: super::super::types::Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: super::super::types::Position {
+                            line: 0,
+                            character: 5,
+                        },
+                    },
+                    severity: Some(1),
+                    code: None,
+                    source: None,
+                    message: "stale".into(),
+                }],
+            )
+            .await;
+
+        // Simulate didOpen invalidation.
+        cache.invalidate(&uri).await;
+
+        let result = cache.get(&uri).await;
+        assert!(result.is_none());
     }
 }
