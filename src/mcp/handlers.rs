@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use super::tools::ToolError;
 use crate::lsp::types::{CallHierarchyItem, Location, Position};
-use crate::lsp::types::{Diagnostic, WorkspaceEdit};
+use crate::lsp::types::{Diagnostic, TextEdit, WorkspaceEdit};
 use crate::project::registry::ProjectRegistry;
 use crate::server::manager::ManagerError;
 use crate::uri::uri_to_path;
@@ -385,7 +385,11 @@ pub async fn rename(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Va
         .get("new_name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ToolError::invalid_params("missing new_name"))?
+        .trim()
         .to_string();
+    if new_name.is_empty() {
+        return Err(ToolError::invalid_params("new_name must be non-empty"));
+    }
 
     let path = Path::new(&p.file_path);
     if !path
@@ -945,20 +949,18 @@ fn format_rename_text(edit: &WorkspaceEdit) -> String {
     let mut total_changes = 0usize;
     let mut file_count = 0usize;
 
-    if let Some(changes) = &edit.changes {
-        for (uri, edits) in changes {
-            file_count += 1;
-            let path = uri_to_path(uri);
-            for te in edits {
-                lines.push(format!(
-                    "{}:{}:{}  →  {}",
-                    path.display(),
-                    te.range.start.line + 1,
-                    te.range.start.character + 1,
-                    te.new_text,
-                ));
-                total_changes += 1;
-            }
+    for (uri, edits) in collect_rename_edits(edit) {
+        file_count += 1;
+        let path = uri_to_path(&uri);
+        for te in &edits {
+            lines.push(format!(
+                "{}:{}:{}  →  {}",
+                path.display(),
+                te.range.start.line + 1,
+                te.range.start.character + 1,
+                te.new_text,
+            ));
+            total_changes += 1;
         }
     }
 
@@ -972,24 +974,53 @@ fn format_rename_text(edit: &WorkspaceEdit) -> String {
 fn format_rename_json(edit: &WorkspaceEdit) -> String {
     let mut changes_map = serde_json::Map::new();
 
-    if let Some(changes) = &edit.changes {
-        for (uri, edits) in changes {
-            let path = uri_to_path(uri).display().to_string();
-            let entries: Vec<Value> = edits
-                .iter()
-                .map(|te| {
-                    serde_json::json!({
-                        "line": te.range.start.line + 1,
-                        "column": te.range.start.character + 1,
-                        "new_text": te.new_text,
-                    })
+    for (uri, edits) in collect_rename_edits(edit) {
+        let path = uri_to_path(&uri).display().to_string();
+        let entries: Vec<Value> = edits
+            .iter()
+            .map(|te| {
+                serde_json::json!({
+                    "line": te.range.start.line + 1,
+                    "column": te.range.start.character + 1,
+                    "new_text": te.new_text,
                 })
-                .collect();
-            changes_map.insert(path, Value::Array(entries));
-        }
+            })
+            .collect();
+        changes_map.insert(path, Value::Array(entries));
     }
 
     serde_json::to_string_pretty(&serde_json::json!({ "changes": changes_map })).unwrap()
+}
+
+/// Normalize both `changes` and `document_changes` from a `WorkspaceEdit`
+/// into a flat list of `(uri, Vec<TextEdit>)` pairs.
+fn collect_rename_edits(edit: &WorkspaceEdit) -> Vec<(String, Vec<TextEdit>)> {
+    let mut result: Vec<(String, Vec<TextEdit>)> = Vec::new();
+
+    if let Some(changes) = &edit.changes {
+        for (uri, edits) in changes {
+            result.push((uri.clone(), edits.clone()));
+        }
+    }
+
+    if let Some(Value::Array(docs)) = &edit.document_changes {
+        for doc in docs {
+            if let Some(uri) = doc
+                .get("textDocument")
+                .and_then(|td| td.get("uri"))
+                .and_then(|v| v.as_str())
+            {
+                let edits: Option<Vec<TextEdit>> = doc
+                    .get("edits")
+                    .and_then(|e| serde_json::from_value(e.clone()).ok());
+                if let Some(edits) = edits {
+                    result.push((uri.to_string(), edits));
+                }
+            }
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -1145,5 +1176,83 @@ mod tests {
     fn tool_params_missing_field() {
         let params = json!({ "file_path": "/src/main.rs" });
         assert!(ToolParams::parse(&params).is_err());
+    }
+
+    // --- document_changes handling ---
+
+    #[test]
+    fn rename_text_document_changes() {
+        let edit = WorkspaceEdit {
+            changes: None,
+            document_changes: Some(json!([
+                {
+                    "textDocument": { "uri": "file:///src/lib.rs", "version": 3 },
+                    "edits": [
+                        { "range": { "start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 7} }, "newText": "baz" }
+                    ]
+                }
+            ])),
+        };
+        let text = format_rename_text(&edit);
+        assert!(text.contains("baz"));
+        assert!(text.contains("(1 changes in 1 files)"));
+    }
+
+    #[test]
+    fn rename_json_document_changes() {
+        let edit = WorkspaceEdit {
+            changes: None,
+            document_changes: Some(json!([
+                {
+                    "textDocument": { "uri": "file:///src/lib.rs", "version": 1 },
+                    "edits": [
+                        { "range": { "start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 3} }, "newText": "qux" }
+                    ]
+                }
+            ])),
+        };
+        let json_str = format_rename_json(&edit);
+        let parsed: Value = serde_json::from_str(&json_str).unwrap();
+        let changes = parsed.get("changes").unwrap().as_object().unwrap();
+        let entries = changes.values().next().unwrap().as_array().unwrap();
+        assert_eq!(entries[0]["new_text"], "qux");
+    }
+
+    #[test]
+    fn rename_both_changes_and_document_changes() {
+        let edit = WorkspaceEdit {
+            changes: Some({
+                let mut map = HashMap::new();
+                map.insert(
+                    "file:///src/a.rs".into(),
+                    vec![TextEdit {
+                        range: Range {
+                            start: crate::lsp::types::Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: crate::lsp::types::Position {
+                                line: 0,
+                                character: 3,
+                            },
+                        },
+                        new_text: "x".into(),
+                    }],
+                );
+                map
+            }),
+            document_changes: Some(json!([
+                {
+                    "textDocument": { "uri": "file:///src/b.rs", "version": 1 },
+                    "edits": [
+                        { "range": { "start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 3} }, "newText": "y" }
+                    ]
+                }
+            ])),
+        };
+        let text = format_rename_text(&edit);
+        assert!(text.contains("x"));
+        assert!(text.contains("y"));
+        assert!(text.contains("(2 changes in 2 files)"));
     }
 }

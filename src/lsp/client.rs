@@ -269,7 +269,7 @@ impl LspClient {
         uri: &str,
         position: super::types::Position,
     ) -> Result<Option<super::types::Hover>, ClientError> {
-        if self.capabilities.hover_provider.is_none() {
+        if !provider_enabled(&self.capabilities.hover_provider) {
             return Err(ClientError::Protocol(
                 "language server does not support hover".into(),
             ));
@@ -301,7 +301,7 @@ impl LspClient {
         &self,
         uri: &str,
     ) -> Result<Vec<super::types::Diagnostic>, ClientError> {
-        if self.capabilities.diagnostic_provider.is_none() {
+        if !provider_enabled(&self.capabilities.diagnostic_provider) {
             return Err(ClientError::Protocol(
                 "language server does not support pull diagnostics".into(),
             ));
@@ -339,7 +339,7 @@ impl LspClient {
         position: super::types::Position,
         new_name: &str,
     ) -> Result<Option<super::types::WorkspaceEdit>, ClientError> {
-        if self.capabilities.rename_provider.is_none() {
+        if !provider_enabled(&self.capabilities.rename_provider) {
             return Err(ClientError::Protocol(
                 "language server does not support rename".into(),
             ));
@@ -370,7 +370,7 @@ impl LspClient {
 
     /// Check whether the language server supports the callHierarchy protocol.
     fn call_hierarchy_supported(&self) -> bool {
-        self.capabilities.call_hierarchy_provider.is_some()
+        provider_enabled(&self.capabilities.call_hierarchy_provider)
     }
 
     /// Send `textDocument/prepareCallHierarchy` and return prepared items.
@@ -544,4 +544,38 @@ fn parse_location_list(value: &Value) -> Vec<super::types::Location> {
         }
     }
     locations
+}
+
+/// Check if a provider capability is enabled.
+/// LSP allows `true`, `false`, or an object (e.g. `{"documentSelector": ...}`).
+/// Both `None` (missing) and `Some(false)` mean the capability is disabled.
+fn provider_enabled(provider: &Option<Value>) -> bool {
+    match provider {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => true, // object form means enabled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_enabled_none() {
+        assert!(!provider_enabled(&None));
+    }
+
+    #[test]
+    fn provider_enabled_bool() {
+        assert!(provider_enabled(&Some(Value::Bool(true))));
+        assert!(!provider_enabled(&Some(Value::Bool(false))));
+    }
+
+    #[test]
+    fn provider_enabled_object() {
+        assert!(provider_enabled(&Some(
+            serde_json::json!({ "documentSelector": [] })
+        )));
+    }
 }
