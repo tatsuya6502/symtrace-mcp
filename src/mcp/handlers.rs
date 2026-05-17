@@ -516,10 +516,11 @@ async fn execute_query(
         .get_mut(&language)
         .expect("server entry must exist after get_client_for_file");
 
-    let language_id = manager
-        .config_for(language)
-        .expect("config must exist for language")
-        .language_id;
+    let language_id = {
+        let cfg = manager.config_for(language).expect("config must exist for language");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        cfg.language_id_for_extension(ext)
+    };
 
     // Ensure file is synced with the language server.
     let uri = entry
@@ -610,10 +611,11 @@ async fn execute_call_hierarchy(
         .get_mut(&language)
         .expect("server entry must exist after get_client_for_file");
 
-    let language_id = manager
-        .config_for(language)
-        .expect("config must exist for language")
-        .language_id;
+    let language_id = {
+        let cfg = manager.config_for(language).expect("config must exist for language");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        cfg.language_id_for_extension(ext)
+    };
 
     let uri = entry
         .file_manager

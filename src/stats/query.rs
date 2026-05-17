@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use super::recorder::StatsRecorder;
+use super::recorder::ReadonlyStatsRecorder;
 
 pub async fn print_stats(project_root: &Path) {
-    let recorder = match StatsRecorder::open_readonly(project_root).await {
+    let recorder = match ReadonlyStatsRecorder::open(project_root).await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Failed to open stats database: {e}");
@@ -21,7 +21,7 @@ pub async fn print_stats(project_root: &Path) {
     print_server_usage(&recorder).await;
 }
 
-async fn print_tool_usage(recorder: &StatsRecorder) {
+async fn print_tool_usage(recorder: &ReadonlyStatsRecorder) {
     println!("Tool Usage:");
     match recorder.query_tool_usage().await {
         Ok(tools) if tools.is_empty() => println!("  (no data)"),
@@ -37,7 +37,7 @@ async fn print_tool_usage(recorder: &StatsRecorder) {
     }
 }
 
-async fn print_top_files(recorder: &StatsRecorder, project_root: &Path) {
+async fn print_top_files(recorder: &ReadonlyStatsRecorder, project_root: &Path) {
     println!("Top Files:");
     match recorder.query_top_files().await {
         Ok(files) if files.is_empty() => println!("  (no data)"),
@@ -54,7 +54,7 @@ async fn print_top_files(recorder: &StatsRecorder, project_root: &Path) {
     }
 }
 
-async fn print_server_usage(recorder: &StatsRecorder) {
+async fn print_server_usage(recorder: &ReadonlyStatsRecorder) {
     println!("Language Servers:");
     match recorder.query_server_usage().await {
         Ok(servers) if servers.is_empty() => println!("  (no data)"),
