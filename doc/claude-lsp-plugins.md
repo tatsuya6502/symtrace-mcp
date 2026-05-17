@@ -1,6 +1,6 @@
 # Claude Code Built-in LSP Plugins — Investigation Results
 
-Date: 2026-05-16
+Date: 2026-05-16 to 2026-05-17
 
 ## Overview
 
@@ -113,7 +113,7 @@ When a plugin is enabled, Claude Code exposes the following tools for code navig
 
 ### Architecture
 
-```
+```text
 ┌─────────────────────┐
 │   Claude Code CLI   │
 │  (LSP client logic) │
@@ -209,7 +209,7 @@ Recommendation: **Disable `rust-analyzer-lsp` when using symtrace-mcp** for Rust
 - Broader language support today (Rust + TypeScript + Python)
 - Deeply integrated into Claude Code's reasoning loop
 
-## Actual Testing Results (2026-05-16)
+## Actual Testing Results (2026-05-16 to 2026-05-17)
 
 Tested with `rust-analyzer-lsp` enabled alongside symtrace-mcp on the symtrace-mcp repository (small Rust project).
 

@@ -143,9 +143,9 @@ Or add the following to `~/.claude/settings.json`:
 
 </details>
 
-### Why symtrace-mcp over built-in LSP plugins?
+### Why symtrace-mcp over built-in LSP plugins? *(as of May 2026)*
 
-Claude Code includes [built-in LSP plugins for 11 languages](https://code.claude.com/docs/en/discover-plugins#code-intelligence) that provide code navigation and auto-diagnostics. symtrace-mcp adds features the built-in plugins lack:
+As of May 2026, Claude Code includes [built-in LSP plugins for 11 languages](https://code.claude.com/docs/en/discover-plugins#code-intelligence) that provide code navigation and auto-diagnostics. symtrace-mcp adds features the built-in plugins lack:
 
 | | Built-in LSP Plugins | symtrace-mcp |
 |--|---------------------|--------------|

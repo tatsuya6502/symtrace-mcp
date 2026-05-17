@@ -143,9 +143,9 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 
 </details>
 
-### 組み込みLSPプラグインではなくsymtrace-mcpを選ぶ理由
+### 組み込みLSPプラグインではなくsymtrace-mcpを選ぶ理由（2026年5月時点）
 
-Claude Codeには[11言語に対応した組み込みLSPプラグイン](https://code.claude.com/docs/en/discover-plugins#code-intelligence)が付属しており、コードナビゲーションと自動診断を提供します。symtrace-mcpは組み込みプラグインにない機能を追加します：
+2026年5月時点で、Claude Codeには[11言語に対応した組み込みLSPプラグイン](https://code.claude.com/docs/en/discover-plugins#code-intelligence)が付属しており、コードナビゲーションと自動診断を提供します。symtrace-mcpは組み込みプラグインにない機能を追加します：
 
 | | 組み込みLSPプラグイン | symtrace-mcp |
 |--|---------------------|--------------|
