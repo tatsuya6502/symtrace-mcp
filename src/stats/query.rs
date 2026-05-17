@@ -3,7 +3,7 @@ use std::path::Path;
 use super::recorder::StatsRecorder;
 
 pub async fn print_stats(project_root: &Path) {
-    let recorder = match StatsRecorder::new(project_root).await {
+    let recorder = match StatsRecorder::open_readonly(project_root).await {
         Ok(r) => r,
         Err(_) => {
             println!("No stats data found.");

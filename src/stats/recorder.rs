@@ -29,6 +29,32 @@ pub struct ServerUsage {
 }
 
 impl StatsRecorder {
+    /// Open the stats database for reading alongside a running MCP server.
+    ///
+    /// Disables file locking so the CLI does not conflict with the server's
+    /// WAL locks. Safe because the CLI only reads.
+    pub async fn open_readonly(project_root: &Path) -> Result<Self, turso::Error> {
+        let db_path = project_root.join(".symtrace").join("stats.db");
+        if !db_path.exists() {
+            return Err(turso::Error::Error("stats database not found".into()));
+        }
+
+        // The server holds fcntl locks on WAL files opened through the
+        // multiprocess path.  Setting LIMBO_DISABLE_FILE_LOCK lets this
+        // read-only process skip those locks.
+        // Safety: called before any async tasks or threads are spawned.
+        unsafe { std::env::set_var("LIMBO_DISABLE_FILE_LOCK", "1") };
+
+        let db = Builder::new_local(db_path.to_str().ok_or_else(|| {
+            turso::Error::Error("database path contains invalid UTF-8".to_string())
+        })?)
+        .experimental_multiprocess_wal(true)
+        .build()
+        .await?;
+
+        Ok(Self { db })
+    }
+
     pub async fn new(project_root: &Path) -> Result<Self, turso::Error> {
         let db_path = project_root.join(".symtrace").join("stats.db");
         if let Some(parent) = db_path.parent() {
