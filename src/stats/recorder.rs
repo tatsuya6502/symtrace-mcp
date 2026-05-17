@@ -113,7 +113,7 @@ impl ReadonlyStatsRecorder {
             .query(
                 "SELECT language, \
                  SUM(CASE WHEN event='started' THEN 1 ELSE 0 END) as startups, \
-                 CAST(ROUND(AVG(CASE WHEN event='started' AND duration_ms IS NOT NULL THEN duration_ms ELSE NULL END)) AS INTEGER) as avg_startup_ms, \
+                 COALESCE(CAST(ROUND(AVG(CASE WHEN event='started' AND duration_ms IS NOT NULL THEN duration_ms ELSE NULL END)) AS INTEGER), 0) as avg_startup_ms, \
                  CAST(COALESCE(SUM(CASE WHEN event='stopped' AND duration_ms IS NOT NULL THEN duration_ms ELSE 0 END), 0) / 1000.0 AS INTEGER) as total_uptime_secs \
                  FROM server_events \
                  WHERE timestamp >= datetime('now', '-7 days') \
