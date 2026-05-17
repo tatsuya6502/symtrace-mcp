@@ -322,15 +322,18 @@ impl LspClient {
             return Ok(Vec::new());
         }
 
+        // LSP can return either FullDocumentDiagnosticReport (with items)
+        // or UnchangedDocumentDiagnosticReport (no items field). Since we
+        // don't track result IDs, unchanged reports yield an empty list.
         #[derive(serde::Deserialize)]
         struct DiagnosticReport {
-            items: Vec<super::types::Diagnostic>,
+            items: Option<Vec<super::types::Diagnostic>>,
         }
 
         let report: DiagnosticReport = serde_json::from_value(result)
             .map_err(|e| ClientError::Protocol(format!("failed to parse DiagnosticReport: {e}")))?;
 
-        Ok(report.items)
+        Ok(report.items.unwrap_or_default())
     }
 
     pub async fn rename(
