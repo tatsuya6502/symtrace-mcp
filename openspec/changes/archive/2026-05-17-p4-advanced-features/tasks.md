@@ -26,4 +26,4 @@
 
 ## 6. Spec Sync
 
-- [ ] 6.1 Archive completed change — merge spec deltas into `openspec/specs/lsp-client/spec.md` and `openspec/specs/tools-definitions/spec.md`
+- [x] 6.1 Archive completed change — merge spec deltas into `openspec/specs/lsp-client/spec.md` and `openspec/specs/tools-definitions/spec.md`
