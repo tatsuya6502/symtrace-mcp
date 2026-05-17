@@ -28,14 +28,24 @@ enum Commands {
     Stats,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
     let cwd = std::env::current_dir().expect("failed to determine current directory");
 
     match cli.command {
-        None => run_server(&cwd).await,
-        Some(Commands::Stats) => stats::print_stats(&cwd).await,
+        None => {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            rt.block_on(run_server(&cwd));
+        }
+        Some(Commands::Stats) => {
+            // The MCP server holds fcntl locks on WAL files. Disabling
+            // file locking lets the stats CLI read the database without
+            // conflicting with a running server. Must happen before the
+            // runtime spawns any worker threads.
+            unsafe { std::env::set_var("LIMBO_DISABLE_FILE_LOCK", "1") };
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            rt.block_on(stats::print_stats(&cwd));
+        }
     }
 }
 

@@ -5,7 +5,8 @@ use super::recorder::StatsRecorder;
 pub async fn print_stats(project_root: &Path) {
     let recorder = match StatsRecorder::open_readonly(project_root).await {
         Ok(r) => r,
-        Err(_) => {
+        Err(e) => {
+            eprintln!("Failed to open stats database: {e}");
             println!("No stats data found.");
             return;
         }

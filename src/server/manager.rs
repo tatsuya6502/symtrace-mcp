@@ -28,6 +28,25 @@ pub struct LanguageServerConfig {
     pub idle_timeout_secs: u64,
 }
 
+impl LanguageServerConfig {
+    /// Return the correct LSP `languageId` for a specific file extension.
+    ///
+    /// The default `language_id` field works as a fallback, but TypeScript-family
+    /// servers require per-extension IDs: `javascript` for `.js`, `javascriptreact`
+    /// for `.jsx`, `typescriptreact` for `.tsx`.
+    pub fn language_id_for_extension(&self, ext: &str) -> &str {
+        match self.language {
+            Language::TypeScript => match ext {
+                "js" => "javascript",
+                "jsx" => "javascriptreact",
+                "tsx" => "typescriptreact",
+                _ => self.language_id,
+            },
+            _ => self.language_id,
+        }
+    }
+}
+
 /// Default configs for Rust and TypeScript.
 fn default_configs() -> HashMap<Language, LanguageServerConfig> {
     let mut map = HashMap::new();

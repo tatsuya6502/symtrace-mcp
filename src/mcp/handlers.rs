@@ -227,10 +227,11 @@ pub async fn hover(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Val
     manager.monitor().touch(language).await;
 
     let entry = servers.get_mut(&language).expect("server entry must exist");
-    let language_id = manager
-        .config_for(language)
-        .expect("config must exist")
-        .language_id;
+    let language_id = {
+        let cfg = manager.config_for(language).expect("config must exist");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        cfg.language_id_for_extension(ext)
+    };
 
     let uri = entry
         .file_manager
@@ -311,10 +312,11 @@ pub async fn diagnostics(
     manager.monitor().touch(language).await;
 
     let entry = servers.get_mut(&language).expect("server entry must exist");
-    let language_id = manager
-        .config_for(language)
-        .expect("config must exist")
-        .language_id;
+    let language_id = {
+        let cfg = manager.config_for(language).expect("config must exist");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        cfg.language_id_for_extension(ext)
+    };
 
     let uri = entry
         .file_manager
@@ -423,10 +425,11 @@ pub async fn rename(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Va
     manager.monitor().touch(language).await;
 
     let entry = servers.get_mut(&language).expect("server entry must exist");
-    let language_id = manager
-        .config_for(language)
-        .expect("config must exist")
-        .language_id;
+    let language_id = {
+        let cfg = manager.config_for(language).expect("config must exist");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        cfg.language_id_for_extension(ext)
+    };
 
     let uri = entry
         .file_manager
