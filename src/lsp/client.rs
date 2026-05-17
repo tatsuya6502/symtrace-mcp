@@ -264,6 +264,110 @@ impl LspClient {
         Ok(parse_location_list(&result))
     }
 
+    pub async fn hover(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Option<super::types::Hover>, ClientError> {
+        if self.capabilities.hover_provider.is_none() {
+            return Err(ClientError::Protocol(
+                "language server does not support hover".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/hover",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let hover: super::types::Hover = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse Hover: {e}")))?;
+
+        Ok(Some(hover))
+    }
+
+    pub async fn diagnostic(
+        &self,
+        uri: &str,
+    ) -> Result<Vec<super::types::Diagnostic>, ClientError> {
+        if self.capabilities.diagnostic_provider.is_none() {
+            return Err(ClientError::Protocol(
+                "language server does not support pull diagnostics".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/diagnostic",
+                serde_json::json!({
+                    "textDocument": { "uri": uri }
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
+
+        #[derive(serde::Deserialize)]
+        struct DiagnosticReport {
+            items: Vec<super::types::Diagnostic>,
+        }
+
+        let report: DiagnosticReport = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse DiagnosticReport: {e}")))?;
+
+        Ok(report.items)
+    }
+
+    pub async fn rename(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+        new_name: &str,
+    ) -> Result<Option<super::types::WorkspaceEdit>, ClientError> {
+        if self.capabilities.rename_provider.is_none() {
+            return Err(ClientError::Protocol(
+                "language server does not support rename".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/rename",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                    "newName": new_name,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let edit: super::types::WorkspaceEdit = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse WorkspaceEdit: {e}")))?;
+
+        Ok(Some(edit))
+    }
+
     /// Check whether the language server supports the callHierarchy protocol.
     fn call_hierarchy_supported(&self) -> bool {
         self.capabilities.call_hierarchy_provider.is_some()

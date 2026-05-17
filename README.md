@@ -23,7 +23,9 @@ It is designed to complement, not replace, existing lightweight code analysis to
 | **Rust trait implementation resolution** | **`symtrace-mcp find_implementations`** |
 | **Jump to definition (type-resolved)** | **`symtrace-mcp goto_definition`** |
 | **Call hierarchy** | **`symtrace-mcp incoming_calls`** / **`outgoing_calls`** |
-| **Type information / hover** | **`symtrace-mcp hover`** *(Planned)* |
+| **Type information / hover** | **`symtrace-mcp hover`** |
+| **Pull diagnostics** | **`symtrace-mcp diagnostics`** |
+| **Rename preview** | **`symtrace-mcp rename`** |
 
 The first tool call to `symtrace-mcp` starts the language server in the background. Subsequent calls reuse the running server. The server shuts down automatically after 10 minutes of inactivity.
 
@@ -153,7 +155,7 @@ As of May 2026, Claude Code includes [built-in LSP plugins for 11 languages](htt
 | Idle shutdown | None — servers stay alive for the entire CLI process | Automatic after 10 min inactivity |
 | Usage analytics | No | `symtrace-mcp stats` |
 | Works with | Claude Code only | Any MCP-compatible AI tool |
-| Auto-diagnostics | Yes | Planned |
+| Auto-diagnostics | Yes | Pull diagnostics (`diagnostics` tool) |
 | Languages | 11 (C/C++, C#, Go, Java, Kotlin, Lua, PHP, Python, Rust, Swift, TS/JS) | Rust only (TS/Python planned) |
 
 If you work on a single Rust project in Claude Code, the built-in plugin may be enough. symtrace-mcp is worth using when you need multi-project support, idle resource management, or usage tracking — or when you use AI tools beyond Claude Code.
@@ -172,7 +174,7 @@ The server reads newline-delimited JSON-RPC 2.0 messages from stdin and writes r
 | Call Hierarchy | `incoming_calls`, `outgoing_calls` | Complete |
 | Usage Stats | Tool call tracking, stats CLI, SQLite-compatible storage | Complete |
 | Multi-language | TypeScript and Python support | Planned |
-| Advanced Features | `hover`, `diagnostics`, `rename` | Planned |
+| Advanced Features | `hover`, `diagnostics`, `rename` | Complete |
 | Installers & Upgrade | `curl \| sh` installer, Homebrew tap, `symtrace-mcp upgrade` | Planned |
 | Doctor Command | `symtrace-mcp doctor` — environment checks and prerequisite validation | Planned |
 | Stats Per Language | Group usage stats by language, schema migration | Planned |
