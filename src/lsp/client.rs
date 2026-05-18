@@ -99,23 +99,40 @@ pub struct LspClient {
 impl LspClientApi for LspClient {
     async fn shutdown(self: Box<Self>) -> Result<(), ClientError> {
         let mut this = *self;
+        let mut first_err: Option<ClientError> = None;
         // Close all tracked open files first.
         for uri in this.open_files.clone() {
-            let _ = this
+            if let Err(e) = this
                 .transport
                 .send_notification(
                     "textDocument/didClose",
                     serde_json::json!({ "textDocument": { "uri": uri } }),
                 )
-                .await;
+                .await
+                && first_err.is_none()
+            {
+                first_err = Some(ClientError::Transport(e.to_string()));
+            }
         }
         this.open_files.clear();
 
         // Send shutdown request.
-        let _ = this.transport.send_request("shutdown", Value::Null).await;
+        if let Err(e) = this.transport.send_request("shutdown", Value::Null).await
+            && first_err.is_none()
+        {
+            first_err = Some(ClientError::Transport(e.to_string()));
+        }
 
         // Send exit notification.
-        let _ = this.transport.send_notification("exit", Value::Null).await;
+        if let Err(e) = this.transport.send_notification("exit", Value::Null).await
+            && first_err.is_none()
+        {
+            first_err = Some(ClientError::Transport(e.to_string()));
+        }
+
+        if let Some(err) = first_err {
+            return Err(err);
+        }
         Ok(())
     }
 

@@ -184,9 +184,10 @@ mod tests {
         mock.expect_did_open().returning(|_, _, _, _| Ok(()));
         fm.ensure_open(&mut mock, &path, "rust").await.unwrap();
 
-        // Modify the file (ensure mtime changes by sleeping briefly).
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Modify the file and advance mtime deterministically.
         std::fs::write(&path, "fn main() { println!(); }").unwrap();
+        filetime::set_file_mtime(&path, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
 
         // Re-open should detect mtime change and send didChange.
         mock.expect_did_change()
