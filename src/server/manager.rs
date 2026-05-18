@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::idle_monitor::IdleMonitor;
-use crate::lsp::client::{ClientError, LspClient};
+use crate::lsp::client::{ClientError, LspClient, LspClientApi};
 use crate::lsp::file_manager::FileManager;
 use crate::stats::StatsRecorder;
 
@@ -112,7 +112,7 @@ impl From<ClientError> for ManagerError {
 
 /// State for a running language server: the client and its file manager.
 pub(crate) struct ServerEntry {
-    pub client: LspClient,
+    pub client: Box<dyn LspClientApi>,
     pub file_manager: FileManager,
 }
 
@@ -238,7 +238,7 @@ impl LanguageServerManager {
                 servers.insert(
                     language,
                     ServerEntry {
-                        client,
+                        client: Box::new(client),
                         file_manager: FileManager::new(),
                     },
                 );
@@ -279,7 +279,7 @@ impl LanguageServerManager {
         if let Some(entry) = servers.remove(&language) {
             let mut client = entry.client;
             let mut fm = entry.file_manager;
-            fm.close_all(&mut client).await;
+            fm.close_all(&mut *client).await;
             client.shutdown().await.map_err(ManagerError::from)?;
 
             let lang_str = format!("{language:?}");
@@ -302,7 +302,7 @@ impl LanguageServerManager {
             if let Some(entry) = servers.remove(&language) {
                 let mut client = entry.client;
                 let mut fm = entry.file_manager;
-                fm.close_all(&mut client).await;
+                fm.close_all(&mut *client).await;
                 let _ = client.shutdown().await;
 
                 let lang_str = format!("{language:?}");
@@ -369,5 +369,207 @@ mod tests {
             manager.language_for_file(Path::new("Component.jsx")),
             Some(Language::TypeScript)
         );
+    }
+
+    // --- Handler query dispatch tests (Group 8) ---
+
+    use crate::lsp::client::{ClientError, MockLspClientApi};
+    use crate::lsp::types::{Diagnostic, Location, Position, Range, TextEdit, WorkspaceEdit};
+
+    fn test_pos() -> Position {
+        Position {
+            line: 0,
+            character: 0,
+        }
+    }
+
+    fn test_range() -> Range {
+        Range {
+            start: test_pos(),
+            end: Position {
+                line: 0,
+                character: 5,
+            },
+        }
+    }
+
+    fn test_location(uri: &str) -> Location {
+        Location {
+            uri: uri.to_string(),
+            range: test_range(),
+        }
+    }
+
+    fn write_temp_file(dir: &tempfile::TempDir, name: &str, content: &str) -> std::path::PathBuf {
+        let path = dir.path().join(name);
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn make_entry(mock: MockLspClientApi) -> ServerEntry {
+        ServerEntry {
+            client: Box::new(mock),
+            file_manager: FileManager::new(),
+        }
+    }
+
+    async fn open_file(entry: &mut ServerEntry, path: &Path, language_id: &str) -> String {
+        entry
+            .file_manager
+            .ensure_open(&mut *entry.client, path, language_id)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn find_references_returns_locations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_references()
+            .returning(|_, _| Ok(vec![test_location("file:///test.rs")]));
+
+        let mut entry = make_entry(mock);
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let results = entry.client.references(&uri, test_pos()).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].uri, "file:///test.rs");
+        assert_eq!(results[0].range.start.line, 0);
+    }
+
+    #[tokio::test]
+    async fn find_references_empty_returns_no_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_references().returning(|_, _| Ok(Vec::new()));
+
+        let mut entry = make_entry(mock);
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let results = entry.client.references(&uri, test_pos()).await.unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn goto_definition_returns_locations_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_goto_definition()
+            .returning(|_, _| Ok(vec![test_location("file:///lib.rs")]));
+
+        let mut entry = make_entry(mock);
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let results = entry
+            .client
+            .goto_definition(&uri, test_pos())
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].uri, "file:///lib.rs");
+    }
+
+    #[tokio::test]
+    async fn hover_returns_formatted_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let hover = crate::lsp::types::Hover {
+            contents: serde_json::json!("pub fn foo() -> i32"),
+            range: Some(test_range()),
+        };
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_hover()
+            .returning(move |_, _| Ok(Some(hover.clone())));
+
+        let mut entry = make_entry(mock);
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let result = entry.client.hover(&uri, test_pos()).await.unwrap();
+        assert!(result.is_some());
+        let h = result.unwrap();
+        assert!(h.contents.is_string());
+    }
+
+    #[tokio::test]
+    async fn diagnostics_returns_severity_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let diag = Diagnostic {
+            range: test_range(),
+            severity: Some(1), // Error
+            code: None,
+            source: None,
+            message: "expected `;`".into(),
+        };
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_diagnostic()
+            .returning(move |_| Ok(vec![diag.clone()]));
+
+        let mut entry = make_entry(mock);
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let results = entry.client.diagnostic(&uri).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].severity, Some(1));
+        assert_eq!(results[0].message, "expected `;`");
+    }
+
+    #[tokio::test]
+    async fn rename_returns_workspace_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let edit = WorkspaceEdit {
+            changes: Some({
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    "file:///test.rs".to_string(),
+                    vec![TextEdit {
+                        range: test_range(),
+                        new_text: "bar".into(),
+                    }],
+                );
+                map
+            }),
+            document_changes: None,
+        };
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_rename()
+            .returning(move |_, _, _| Ok(Some(edit.clone())));
+
+        let mut entry = make_entry(mock);
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let result = entry.client.rename(&uri, test_pos(), "bar").await.unwrap();
+        assert!(result.is_some());
+        let ws = result.unwrap();
+        let changes = ws.changes.unwrap();
+        assert!(changes.contains_key("file:///test.rs"));
+    }
+
+    #[tokio::test]
+    async fn client_error_from_mock_returns_transport_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_goto_definition()
+            .returning(|_, _| Err(ClientError::Transport("connection lost".into())));
+
+        let mut entry = make_entry(mock);
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let result = entry.client.goto_definition(&uri, test_pos()).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ClientError::Transport(msg) if msg == "connection lost"));
     }
 }

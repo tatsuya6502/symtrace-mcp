@@ -235,7 +235,7 @@ pub async fn hover(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Val
 
     let uri = entry
         .file_manager
-        .ensure_open(&mut entry.client, path, language_id)
+        .ensure_open(&mut *entry.client, path, language_id)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
 
@@ -320,7 +320,7 @@ pub async fn diagnostics(
 
     let uri = entry
         .file_manager
-        .ensure_open(&mut entry.client, path, language_id)
+        .ensure_open(&mut *entry.client, path, language_id)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
 
@@ -433,7 +433,7 @@ pub async fn rename(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Va
 
     let uri = entry
         .file_manager
-        .ensure_open(&mut entry.client, path, language_id)
+        .ensure_open(&mut *entry.client, path, language_id)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
 
@@ -517,7 +517,9 @@ async fn execute_query(
         .expect("server entry must exist after get_client_for_file");
 
     let language_id = {
-        let cfg = manager.config_for(language).expect("config must exist for language");
+        let cfg = manager
+            .config_for(language)
+            .expect("config must exist for language");
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         cfg.language_id_for_extension(ext)
     };
@@ -525,7 +527,7 @@ async fn execute_query(
     // Ensure file is synced with the language server.
     let uri = entry
         .file_manager
-        .ensure_open(&mut entry.client, path, language_id)
+        .ensure_open(&mut *entry.client, path, language_id)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
 
@@ -612,14 +614,16 @@ async fn execute_call_hierarchy(
         .expect("server entry must exist after get_client_for_file");
 
     let language_id = {
-        let cfg = manager.config_for(language).expect("config must exist for language");
+        let cfg = manager
+            .config_for(language)
+            .expect("config must exist for language");
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         cfg.language_id_for_extension(ext)
     };
 
     let uri = entry
         .file_manager
-        .ensure_open(&mut entry.client, path, language_id)
+        .ensure_open(&mut *entry.client, path, language_id)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
 

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use moka::future::Cache;
 use serde_json::Value;
 
@@ -29,6 +30,61 @@ impl std::fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
+#[cfg_attr(test, mockall::automock)]
+#[async_trait]
+pub trait LspClientApi: Send + Sync {
+    async fn did_open(
+        &mut self,
+        uri: &str,
+        text: &str,
+        version: i32,
+        language_id: &str,
+    ) -> Result<(), ClientError>;
+    async fn did_change(&mut self, uri: &str, text: &str, version: i32) -> Result<(), ClientError>;
+    async fn did_close(&mut self, uri: &str) -> Result<(), ClientError>;
+    async fn goto_definition(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::Location>, ClientError>;
+    async fn references(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::Location>, ClientError>;
+    async fn implementations(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::Location>, ClientError>;
+    async fn hover(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Option<super::types::Hover>, ClientError>;
+    async fn diagnostic(&self, uri: &str) -> Result<Vec<super::types::Diagnostic>, ClientError>;
+    async fn rename(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+        new_name: &str,
+    ) -> Result<Option<super::types::WorkspaceEdit>, ClientError>;
+    async fn prepare_call_hierarchy(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::CallHierarchyItem>, ClientError>;
+    async fn incoming_calls(
+        &self,
+        item: &super::types::CallHierarchyItem,
+    ) -> Result<Vec<super::types::CallHierarchyIncomingCall>, ClientError>;
+    async fn outgoing_calls(
+        &self,
+        item: &super::types::CallHierarchyItem,
+    ) -> Result<Vec<super::types::CallHierarchyOutgoingCall>, ClientError>;
+    async fn shutdown(self: Box<Self>) -> Result<(), ClientError>;
+}
+
 /// High-level LSP client that manages lifecycle, file tracking, and queries
 /// on top of [`LspTransport`].
 pub struct LspClient {
@@ -38,6 +94,337 @@ pub struct LspClient {
     capabilities: ServerCapabilities,
     diagnostics_cache: Cache<String, Vec<Diagnostic>>,
 }
+
+#[async_trait]
+impl LspClientApi for LspClient {
+    async fn shutdown(self: Box<Self>) -> Result<(), ClientError> {
+        let mut this = *self;
+        // Close all tracked open files first.
+        for uri in this.open_files.clone() {
+            let _ = this
+                .transport
+                .send_notification(
+                    "textDocument/didClose",
+                    serde_json::json!({ "textDocument": { "uri": uri } }),
+                )
+                .await;
+        }
+        this.open_files.clear();
+
+        // Send shutdown request.
+        let _ = this.transport.send_request("shutdown", Value::Null).await;
+
+        // Send exit notification.
+        let _ = this.transport.send_notification("exit", Value::Null).await;
+        Ok(())
+    }
+
+    async fn did_open(
+        &mut self,
+        uri: &str,
+        text: &str,
+        version: i32,
+        language_id: &str,
+    ) -> Result<(), ClientError> {
+        self.transport
+            .send_notification(
+                "textDocument/didOpen",
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": uri,
+                        "languageId": language_id,
+                        "version": version,
+                        "text": text,
+                    }
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        self.open_files.insert(uri.to_string());
+        self.diagnostics_cache.invalidate(uri).await;
+        Ok(())
+    }
+
+    async fn did_change(&mut self, uri: &str, text: &str, version: i32) -> Result<(), ClientError> {
+        self.transport
+            .send_notification(
+                "textDocument/didChange",
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": uri,
+                        "version": version,
+                    },
+                    "contentChanges": [{ "text": text }]
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        self.diagnostics_cache.invalidate(uri).await;
+        Ok(())
+    }
+
+    async fn did_close(&mut self, uri: &str) -> Result<(), ClientError> {
+        self.transport
+            .send_notification(
+                "textDocument/didClose",
+                serde_json::json!({ "textDocument": { "uri": uri } }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+        self.open_files.remove(uri);
+        Ok(())
+    }
+
+    async fn goto_definition(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::Location>, ClientError> {
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/definition",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        Ok(parse_location_list(&result))
+    }
+
+    async fn references(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::Location>, ClientError> {
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/references",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                    "context": { "includeDeclaration": false }
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        Ok(parse_location_list(&result))
+    }
+
+    async fn implementations(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::Location>, ClientError> {
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/implementation",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        Ok(parse_location_list(&result))
+    }
+
+    async fn hover(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Option<super::types::Hover>, ClientError> {
+        if !provider_enabled(&self.capabilities.hover_provider) {
+            return Err(ClientError::Protocol(
+                "language server does not support hover".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/hover",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let hover: super::types::Hover = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse Hover: {e}")))?;
+
+        Ok(Some(hover))
+    }
+
+    async fn diagnostic(&self, uri: &str) -> Result<Vec<super::types::Diagnostic>, ClientError> {
+        if !provider_enabled(&self.capabilities.diagnostic_provider) {
+            // Server does not support pull diagnostics — read from push cache.
+            return Ok(self.diagnostics_cache.get(uri).await.unwrap_or_default());
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/diagnostic",
+                serde_json::json!({
+                    "textDocument": { "uri": uri }
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
+
+        // LSP can return either FullDocumentDiagnosticReport (with items)
+        // or UnchangedDocumentDiagnosticReport (no items field). Since we
+        // don't track result IDs, unchanged reports yield an empty list.
+        #[derive(serde::Deserialize)]
+        struct DiagnosticReport {
+            items: Option<Vec<super::types::Diagnostic>>,
+        }
+
+        let report: DiagnosticReport = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse DiagnosticReport: {e}")))?;
+
+        Ok(report.items.unwrap_or_default())
+    }
+
+    async fn rename(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+        new_name: &str,
+    ) -> Result<Option<super::types::WorkspaceEdit>, ClientError> {
+        if !provider_enabled(&self.capabilities.rename_provider) {
+            return Err(ClientError::Protocol(
+                "language server does not support rename".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/rename",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                    "newName": new_name,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        if result.is_null() {
+            return Ok(None);
+        }
+
+        let edit: super::types::WorkspaceEdit = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("failed to parse WorkspaceEdit: {e}")))?;
+
+        Ok(Some(edit))
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        uri: &str,
+        position: super::types::Position,
+    ) -> Result<Vec<super::types::CallHierarchyItem>, ClientError> {
+        if !self.call_hierarchy_supported() {
+            return Err(ClientError::Protocol(
+                "language server does not support call hierarchy".into(),
+            ));
+        }
+
+        let result = self
+            .transport
+            .send_request(
+                "textDocument/prepareCallHierarchy",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "position": position,
+                }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        let items: Vec<super::types::CallHierarchyItem> = if result.is_null() {
+            Vec::new()
+        } else {
+            serde_json::from_value(result).map_err(|e| {
+                ClientError::Protocol(format!("failed to parse CallHierarchyItem[]: {e}"))
+            })?
+        };
+
+        Ok(items)
+    }
+
+    async fn incoming_calls(
+        &self,
+        item: &super::types::CallHierarchyItem,
+    ) -> Result<Vec<super::types::CallHierarchyIncomingCall>, ClientError> {
+        let result = self
+            .transport
+            .send_request(
+                "callHierarchy/incomingCalls",
+                serde_json::json!({ "item": item }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        let calls: Vec<super::types::CallHierarchyIncomingCall> = if result.is_null() {
+            Vec::new()
+        } else {
+            serde_json::from_value(result).map_err(|e| {
+                ClientError::Protocol(format!("failed to parse CallHierarchyIncomingCall[]: {e}"))
+            })?
+        };
+
+        Ok(calls)
+    }
+
+    async fn outgoing_calls(
+        &self,
+        item: &super::types::CallHierarchyItem,
+    ) -> Result<Vec<super::types::CallHierarchyOutgoingCall>, ClientError> {
+        let result = self
+            .transport
+            .send_request(
+                "callHierarchy/outgoingCalls",
+                serde_json::json!({ "item": item }),
+            )
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+
+        let calls: Vec<super::types::CallHierarchyOutgoingCall> = if result.is_null() {
+            Vec::new()
+        } else {
+            serde_json::from_value(result).map_err(|e| {
+                ClientError::Protocol(format!("failed to parse CallHierarchyOutgoingCall[]: {e}"))
+            })?
+        };
+
+        Ok(calls)
+    }
+}
+
+// --- Concrete methods not on the trait ---
 
 impl LspClient {
     /// Start a language server and perform the LSP handshake.
@@ -106,100 +493,6 @@ impl LspClient {
         })
     }
 
-    /// Shut down the language server gracefully.
-    ///
-    /// Sends `shutdown`, waits for the response, then sends `exit`.
-    /// Also closes any files still tracked as open.
-    pub async fn shutdown(mut self) -> Result<(), ClientError> {
-        // Close all tracked open files first.
-        for uri in self.open_files.clone() {
-            let _ = self
-                .transport
-                .send_notification(
-                    "textDocument/didClose",
-                    serde_json::json!({ "textDocument": { "uri": uri } }),
-                )
-                .await;
-        }
-        self.open_files.clear();
-
-        // Send shutdown request.
-        let _ = self.transport.send_request("shutdown", Value::Null).await;
-
-        // Send exit notification.
-        let _ = self.transport.send_notification("exit", Value::Null).await;
-        Ok(())
-    }
-
-    /// Ensure a file is open in the language server.
-    ///
-    /// Sends `textDocument/didOpen` if the file is not currently tracked.
-    /// Does NOT handle `didChange` — that is `FileManager`'s responsibility.
-    pub async fn did_open(
-        &mut self,
-        uri: &str,
-        text: &str,
-        version: i32,
-        language_id: &str,
-    ) -> Result<(), ClientError> {
-        self.transport
-            .send_notification(
-                "textDocument/didOpen",
-                serde_json::json!({
-                    "textDocument": {
-                        "uri": uri,
-                        "languageId": language_id,
-                        "version": version,
-                        "text": text,
-                    }
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        self.open_files.insert(uri.to_string());
-        self.diagnostics_cache.invalidate(uri).await;
-        Ok(())
-    }
-
-    /// Send `textDocument/didChange` for an already-open file.
-    pub async fn did_change(
-        &mut self,
-        uri: &str,
-        text: &str,
-        version: i32,
-    ) -> Result<(), ClientError> {
-        self.transport
-            .send_notification(
-                "textDocument/didChange",
-                serde_json::json!({
-                    "textDocument": {
-                        "uri": uri,
-                        "version": version,
-                    },
-                    "contentChanges": [{ "text": text }]
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        self.diagnostics_cache.invalidate(uri).await;
-        Ok(())
-    }
-
-    /// Send `textDocument/didClose` for a file.
-    pub async fn did_close(&mut self, uri: &str) -> Result<(), ClientError> {
-        self.transport
-            .send_notification(
-                "textDocument/didClose",
-                serde_json::json!({ "textDocument": { "uri": uri } }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-        self.open_files.remove(uri);
-        Ok(())
-    }
-
     /// Return whether a file is currently tracked as open.
     #[allow(dead_code)]
     pub fn is_file_open(&self, uri: &str) -> bool {
@@ -224,266 +517,9 @@ impl LspClient {
         &self.root_uri
     }
 
-    // --- LSP query methods ---
-
-    /// Send `textDocument/definition` and return locations.
-    pub async fn goto_definition(
-        &self,
-        uri: &str,
-        position: super::types::Position,
-    ) -> Result<Vec<super::types::Location>, ClientError> {
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/definition",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        Ok(parse_location_list(&result))
-    }
-
-    /// Send `textDocument/references` and return locations.
-    pub async fn references(
-        &self,
-        uri: &str,
-        position: super::types::Position,
-    ) -> Result<Vec<super::types::Location>, ClientError> {
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/references",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                    "context": { "includeDeclaration": false }
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        Ok(parse_location_list(&result))
-    }
-
-    /// Send `textDocument/implementation` and return locations.
-    pub async fn implementations(
-        &self,
-        uri: &str,
-        position: super::types::Position,
-    ) -> Result<Vec<super::types::Location>, ClientError> {
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/implementation",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        Ok(parse_location_list(&result))
-    }
-
-    pub async fn hover(
-        &self,
-        uri: &str,
-        position: super::types::Position,
-    ) -> Result<Option<super::types::Hover>, ClientError> {
-        if !provider_enabled(&self.capabilities.hover_provider) {
-            return Err(ClientError::Protocol(
-                "language server does not support hover".into(),
-            ));
-        }
-
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/hover",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        if result.is_null() {
-            return Ok(None);
-        }
-
-        let hover: super::types::Hover = serde_json::from_value(result)
-            .map_err(|e| ClientError::Protocol(format!("failed to parse Hover: {e}")))?;
-
-        Ok(Some(hover))
-    }
-
-    pub async fn diagnostic(
-        &self,
-        uri: &str,
-    ) -> Result<Vec<super::types::Diagnostic>, ClientError> {
-        if !provider_enabled(&self.capabilities.diagnostic_provider) {
-            // Server does not support pull diagnostics — read from push cache.
-            return Ok(self.diagnostics_cache.get(uri).await.unwrap_or_default());
-        }
-
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/diagnostic",
-                serde_json::json!({
-                    "textDocument": { "uri": uri }
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        if result.is_null() {
-            return Ok(Vec::new());
-        }
-
-        // LSP can return either FullDocumentDiagnosticReport (with items)
-        // or UnchangedDocumentDiagnosticReport (no items field). Since we
-        // don't track result IDs, unchanged reports yield an empty list.
-        #[derive(serde::Deserialize)]
-        struct DiagnosticReport {
-            items: Option<Vec<super::types::Diagnostic>>,
-        }
-
-        let report: DiagnosticReport = serde_json::from_value(result)
-            .map_err(|e| ClientError::Protocol(format!("failed to parse DiagnosticReport: {e}")))?;
-
-        Ok(report.items.unwrap_or_default())
-    }
-
-    pub async fn rename(
-        &self,
-        uri: &str,
-        position: super::types::Position,
-        new_name: &str,
-    ) -> Result<Option<super::types::WorkspaceEdit>, ClientError> {
-        if !provider_enabled(&self.capabilities.rename_provider) {
-            return Err(ClientError::Protocol(
-                "language server does not support rename".into(),
-            ));
-        }
-
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/rename",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                    "newName": new_name,
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        if result.is_null() {
-            return Ok(None);
-        }
-
-        let edit: super::types::WorkspaceEdit = serde_json::from_value(result)
-            .map_err(|e| ClientError::Protocol(format!("failed to parse WorkspaceEdit: {e}")))?;
-
-        Ok(Some(edit))
-    }
-
     /// Check whether the language server supports the callHierarchy protocol.
     fn call_hierarchy_supported(&self) -> bool {
         provider_enabled(&self.capabilities.call_hierarchy_provider)
-    }
-
-    /// Send `textDocument/prepareCallHierarchy` and return prepared items.
-    pub async fn prepare_call_hierarchy(
-        &self,
-        uri: &str,
-        position: super::types::Position,
-    ) -> Result<Vec<super::types::CallHierarchyItem>, ClientError> {
-        if !self.call_hierarchy_supported() {
-            return Err(ClientError::Protocol(
-                "language server does not support call hierarchy".into(),
-            ));
-        }
-
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/prepareCallHierarchy",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        let items: Vec<super::types::CallHierarchyItem> = if result.is_null() {
-            Vec::new()
-        } else {
-            serde_json::from_value(result).map_err(|e| {
-                ClientError::Protocol(format!("failed to parse CallHierarchyItem[]: {e}"))
-            })?
-        };
-
-        Ok(items)
-    }
-
-    /// Send `callHierarchy/incomingCalls` and return callers.
-    pub async fn incoming_calls(
-        &self,
-        item: &super::types::CallHierarchyItem,
-    ) -> Result<Vec<super::types::CallHierarchyIncomingCall>, ClientError> {
-        let result = self
-            .transport
-            .send_request(
-                "callHierarchy/incomingCalls",
-                serde_json::json!({ "item": item }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        let calls: Vec<super::types::CallHierarchyIncomingCall> = if result.is_null() {
-            Vec::new()
-        } else {
-            serde_json::from_value(result).map_err(|e| {
-                ClientError::Protocol(format!("failed to parse CallHierarchyIncomingCall[]: {e}"))
-            })?
-        };
-
-        Ok(calls)
-    }
-
-    /// Send `callHierarchy/outgoingCalls` and return callees.
-    pub async fn outgoing_calls(
-        &self,
-        item: &super::types::CallHierarchyItem,
-    ) -> Result<Vec<super::types::CallHierarchyOutgoingCall>, ClientError> {
-        let result = self
-            .transport
-            .send_request(
-                "callHierarchy/outgoingCalls",
-                serde_json::json!({ "item": item }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        let calls: Vec<super::types::CallHierarchyOutgoingCall> = if result.is_null() {
-            Vec::new()
-        } else {
-            serde_json::from_value(result).map_err(|e| {
-                ClientError::Protocol(format!("failed to parse CallHierarchyOutgoingCall[]: {e}"))
-            })?
-        };
-
-        Ok(calls)
     }
 
     /// Send `textDocument/documentSymbol` and return whether the server
@@ -741,5 +777,101 @@ mod tests {
 
         let result = cache.get(&uri).await;
         assert!(result.is_none());
+    }
+
+    // --- Capability gating tests (Group 6) ---
+
+    fn test_position() -> super::super::types::Position {
+        super::super::types::Position {
+            line: 5,
+            character: 10,
+        }
+    }
+
+    fn test_range() -> super::super::types::Range {
+        super::super::types::Range {
+            start: super::super::types::Position {
+                line: 0,
+                character: 0,
+            },
+            end: super::super::types::Position {
+                line: 0,
+                character: 5,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn hover_returns_none_on_null() {
+        let mut mock = MockLspClientApi::new();
+        mock.expect_hover().returning(|_, _| Ok(None));
+
+        let result = mock.hover("file:///test.rs", test_position()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn hover_handles_marked_string_object() {
+        let hover = super::super::types::Hover {
+            contents: serde_json::json!({
+                "language": "rust",
+                "value": "fn main()"
+            }),
+            range: Some(test_range()),
+        };
+
+        let mut mock = MockLspClientApi::new();
+        mock.expect_hover()
+            .returning(move |_, _| Ok(Some(hover.clone())));
+
+        let result = mock.hover("file:///test.rs", test_position()).await;
+        let hover_result = result.unwrap().unwrap();
+        assert!(hover_result.contents.is_object());
+        assert_eq!(hover_result.contents["language"], "rust");
+        assert_eq!(hover_result.contents["value"], "fn main()");
+    }
+
+    #[tokio::test]
+    async fn diagnostic_fallback_to_push_cache() {
+        let mut mock = MockLspClientApi::new();
+        // Simulate a server without pull-diagnostics: returns empty vec.
+        mock.expect_diagnostic().returning(|_| Ok(Vec::new()));
+
+        let result = mock.diagnostic("file:///test.rs").await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn diagnostic_sends_pull_request() {
+        let diag = Diagnostic {
+            range: test_range(),
+            severity: Some(1),
+            code: None,
+            source: None,
+            message: "unused variable".into(),
+        };
+
+        let mut mock = MockLspClientApi::new();
+        mock.expect_diagnostic()
+            .returning(move |_| Ok(vec![diag.clone()]));
+
+        let result = mock.diagnostic("file:///test.rs").await;
+        let diags = result.unwrap();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "unused variable");
+    }
+
+    #[tokio::test]
+    async fn rename_returns_none_on_null() {
+        let mut mock = MockLspClientApi::new();
+        mock.expect_rename().returning(|_, _, _| Ok(None));
+
+        let result = mock
+            .rename("file:///test.rs", test_position(), "new_name")
+            .await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 }
