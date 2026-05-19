@@ -608,9 +608,14 @@ impl LspClient {
     ///
     /// Returns `Ok(())` immediately if the server does not advertise
     /// `workspaceSymbolProvider` capability. Also returns `Ok(())` after
-    /// 5 consecutive empty-result or error polls, as this indicates the
-    /// server is responsive but doesn't support the query or hasn't loaded
-    /// a project yet (e.g., typescript-language-server before `didOpen`).
+    /// 5 consecutive non-success polls (empty results or errors), as this
+    /// indicates the server is responsive but doesn't support the query or
+    /// hasn't loaded a project yet (e.g., typescript-language-server returns
+    /// JSON-RPC error "No Project" before any file is opened via `didOpen`).
+    ///
+    /// An unreachable server is handled by the overall `timeout` — each poll
+    /// is also bounded by `per_request_timeout`, so a truly broken server
+    /// won't trigger the early bailout (it will time out instead).
     pub async fn wait_for_index(&self, timeout: std::time::Duration) -> Result<(), ClientError> {
         if !provider_enabled(&self.capabilities.workspace_symbol_provider) {
             return Ok(());
