@@ -17,6 +17,8 @@ fn fixture_index() -> PathBuf {
 }
 
 async fn spawn_client() -> McpClient {
+    common::require_command("typescript-language-server");
+
     let mut cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cwd.push("fixtures/ts-project");
 

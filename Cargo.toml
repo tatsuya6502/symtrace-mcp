@@ -27,3 +27,4 @@ integration = ["integration-rust", "integration-typescript"]
 filetime = "0.2"
 mockall = "0.14"
 tempfile = "3.27.0"
+which = "7"

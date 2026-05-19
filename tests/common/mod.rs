@@ -212,3 +212,13 @@ impl Drop for McpClient {
         let _ = self.child.start_kill();
     }
 }
+
+/// Panic if a required command is not found on PATH.
+pub fn require_command(name: &str) {
+    if which::which(name).is_err() {
+        panic!(
+            "`{name}` not found on PATH — skipping integration test would mask the failure. \
+             Install it with: rustup component add {name}"
+        );
+    }
+}

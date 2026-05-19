@@ -17,6 +17,8 @@ fn fixture_lib() -> PathBuf {
 }
 
 async fn spawn_client() -> McpClient {
+    common::require_command("rust-analyzer");
+
     let mut cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cwd.push("fixtures/rust-project");
 
