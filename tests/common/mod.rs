@@ -138,27 +138,46 @@ impl McpClient {
         let start = tokio::time::Instant::now();
         let mut delay = Duration::from_millis(100);
         let max_delay = Duration::from_secs(2);
+        let mut last_error: Option<String> = None;
 
         loop {
-            match self
-                .tools_call(
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                let detail =
+                    last_error.unwrap_or_else(|| "timed out waiting for readiness".to_string());
+                return Err(format!(
+                    "LSP server not ready after {:.1}s: {detail}",
+                    elapsed.as_secs_f64()
+                ));
+            }
+
+            let remaining = timeout.saturating_sub(elapsed);
+
+            match tokio::time::timeout(
+                remaining,
+                self.tools_call(
                     "goto_definition",
                     json!({
                         "file_path": file_path,
                         "line": line,
                         "column": column,
                     }),
-                )
-                .await
+                ),
+            )
+            .await
             {
-                Ok(_) => return Ok(()),
-                Err(_) if start.elapsed() < timeout => {
-                    sleep(delay).await;
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(e)) => {
+                    last_error = Some(e);
+                    let sleep_for = delay.min(timeout.saturating_sub(start.elapsed()));
+                    if !sleep_for.is_zero() {
+                        sleep(sleep_for).await;
+                    }
                     delay = (delay * 2).min(max_delay);
                 }
-                Err(e) => {
+                Err(_) => {
                     return Err(format!(
-                        "LSP server not ready after {:.1}s: {e}",
+                        "LSP server not ready after {:.1}s: readiness probe timed out",
                         start.elapsed().as_secs_f64()
                     ));
                 }
@@ -216,9 +235,6 @@ impl Drop for McpClient {
 /// Panic if a required command is not found on PATH.
 pub fn require_command(name: &str) {
     if which::which(name).is_err() {
-        panic!(
-            "`{name}` not found on PATH — skipping integration test would mask the failure. \
-             Install it with: rustup component add {name}"
-        );
+        panic!("`{name}` not found on PATH. Install it and re-run the integration test.");
     }
 }

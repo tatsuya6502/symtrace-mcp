@@ -614,7 +614,14 @@ impl LspClient {
         let per_request_timeout = std::time::Duration::from_secs(5);
 
         loop {
-            let result = tokio::time::timeout(per_request_timeout, self.workspace_symbol(""))
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                return Err(ClientError::IndexTimeout);
+            }
+            let remaining = timeout - elapsed;
+            let request_timeout = std::cmp::min(per_request_timeout, remaining);
+
+            let result = tokio::time::timeout(request_timeout, self.workspace_symbol(""))
                 .await
                 .unwrap_or(Err(ClientError::Transport(
                     "workspace/symbol request timed out".into(),
@@ -623,9 +630,6 @@ impl LspClient {
             match result {
                 Ok(true) => return Ok(()),
                 Ok(false) | Err(_) => {
-                    if start.elapsed() >= timeout {
-                        return Err(ClientError::IndexTimeout);
-                    }
                     tokio::time::sleep(poll_interval).await;
                 }
             }
