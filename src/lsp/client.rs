@@ -607,7 +607,10 @@ impl LspClient {
     /// when the server is slow to respond during startup.
     ///
     /// Returns `Ok(())` immediately if the server does not advertise
-    /// `workspaceSymbolProvider` capability.
+    /// `workspaceSymbolProvider` capability. Also returns `Ok(())` after
+    /// 5 consecutive empty-result or error polls, as this indicates the
+    /// server is responsive but doesn't support the query or hasn't loaded
+    /// a project yet (e.g., typescript-language-server before `didOpen`).
     pub async fn wait_for_index(&self, timeout: std::time::Duration) -> Result<(), ClientError> {
         if !provider_enabled(&self.capabilities.workspace_symbol_provider) {
             return Ok(());
@@ -616,6 +619,8 @@ impl LspClient {
         let start = std::time::Instant::now();
         let poll_interval = std::time::Duration::from_millis(500);
         let per_request_timeout = std::time::Duration::from_secs(5);
+        let mut fail_count: u32 = 0;
+        const MAX_FAIL_POLLS: u32 = 5;
 
         loop {
             let elapsed = start.elapsed();
@@ -634,6 +639,10 @@ impl LspClient {
             match result {
                 Ok(true) => return Ok(()),
                 Ok(false) | Err(_) => {
+                    fail_count += 1;
+                    if fail_count >= MAX_FAIL_POLLS {
+                        return Ok(());
+                    }
                     tokio::time::sleep(poll_interval).await;
                 }
             }
