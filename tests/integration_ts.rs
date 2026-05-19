@@ -30,7 +30,7 @@ async fn spawn_client() -> McpClient {
     // Wait for typescript-language-server to finish indexing
     // Line 25, col 20: `new User("Alice", 30)` — cursor on User constructor
     client
-        .wait_for_ready(index_str, 25, 20, Duration::from_secs(30))
+        .wait_for_ready(index_str, 25, 20, Duration::from_secs(60))
         .await
         .unwrap();
 

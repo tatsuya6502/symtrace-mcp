@@ -304,9 +304,18 @@ impl LspClientApi for LspClient {
         const MAX_RETRIES: u32 = 3;
         let mut result = None;
         for attempt in 0..=MAX_RETRIES {
-            match self.transport.send_request("textDocument/diagnostic", params.clone()).await {
-                Ok(val) => { result = Some(val); break; }
-                Err(super::transport::LspError::JsonRpc { code: -32802, .. }) if attempt < MAX_RETRIES => {
+            match self
+                .transport
+                .send_request("textDocument/diagnostic", params.clone())
+                .await
+            {
+                Ok(val) => {
+                    result = Some(val);
+                    break;
+                }
+                Err(super::transport::LspError::JsonRpc { code: -32802, .. })
+                    if attempt < MAX_RETRIES =>
+                {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Err(e) => return Err(ClientError::Transport(e.to_string())),
@@ -589,13 +598,29 @@ impl LspClient {
     /// Wait for the language server to finish indexing by polling
     /// `workspace/symbol` with an empty query until a non-empty result arrives.
     ///
-    /// Polls every 500ms with the given overall timeout.
+    /// Polls every 500ms with the given overall timeout. Each individual
+    /// `workspace/symbol` request has a 5-second timeout to prevent hangs
+    /// when the server is slow to respond during startup.
+    ///
+    /// Returns `Ok(())` immediately if the server does not advertise
+    /// `workspaceSymbolProvider` capability.
     pub async fn wait_for_index(&self, timeout: std::time::Duration) -> Result<(), ClientError> {
+        if !provider_enabled(&self.capabilities.workspace_symbol_provider) {
+            return Ok(());
+        }
+
         let start = std::time::Instant::now();
         let poll_interval = std::time::Duration::from_millis(500);
+        let per_request_timeout = std::time::Duration::from_secs(5);
 
         loop {
-            match self.workspace_symbol("").await {
+            let result = tokio::time::timeout(per_request_timeout, self.workspace_symbol(""))
+                .await
+                .unwrap_or(Err(ClientError::Transport(
+                    "workspace/symbol request timed out".into(),
+                )));
+
+            match result {
                 Ok(true) => return Ok(()),
                 Ok(false) | Err(_) => {
                     if start.elapsed() >= timeout {

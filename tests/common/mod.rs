@@ -81,7 +81,7 @@ impl McpClient {
         self.write_message(&request).await?;
 
         // Read responses, skipping notifications (no "id" or different id)
-        tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 let msg = self.read_message().await?;
                 if msg.get("id").and_then(|v| v.as_u64()) == Some(id) {
