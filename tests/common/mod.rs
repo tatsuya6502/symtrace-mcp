@@ -8,7 +8,7 @@ use tokio::time::{Duration, sleep};
 
 pub struct McpClient {
     child: Child,
-    stdin: tokio::process::ChildStdin,
+    stdin: Option<tokio::process::ChildStdin>,
     stdout: BufReader<tokio::process::ChildStdout>,
     next_id: u64,
 }
@@ -35,7 +35,7 @@ impl McpClient {
 
         let mut client = Self {
             child,
-            stdin,
+            stdin: Some(stdin),
             stdout: BufReader::new(stdout),
             next_id: 1,
         };
@@ -187,7 +187,11 @@ impl McpClient {
 
     /// Terminate the subprocess.
     pub async fn shutdown(&mut self) -> Result<(), String> {
-        let _ = self.send_notification("shutdown", None).await;
+        // Drop stdin to send EOF — the MCP server treats stdin EOF as a
+        // shutdown signal and gracefully closes all LSP clients.
+        // Note: AsyncWrite::shutdown() is a no-op for pipes on Linux;
+        // only dropping the ChildStdin actually closes the pipe and sends EOF.
+        drop(self.stdin.take());
 
         match tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await {
             Ok(Ok(_)) => Ok(()),
@@ -201,11 +205,15 @@ impl McpClient {
     async fn write_message(&mut self, msg: &Value) -> Result<(), String> {
         let mut line = serde_json::to_string(msg).map_err(|e| format!("serialize: {e}"))?;
         line.push('\n');
-        self.stdin
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "stdin already closed".to_string())?;
+        stdin
             .write_all(line.as_bytes())
             .await
             .map_err(|e| format!("write: {e}"))?;
-        self.stdin
+        stdin
             .flush()
             .await
             .map_err(|e| format!("flush: {e}"))?;
