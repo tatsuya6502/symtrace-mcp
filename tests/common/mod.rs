@@ -26,7 +26,7 @@ impl McpClient {
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("failed to spawn symtrace-mcp: {e}"))?;
 
@@ -81,15 +81,19 @@ impl McpClient {
         self.write_message(&request).await?;
 
         // Read responses, skipping notifications (no "id" or different id)
-        loop {
-            let msg = self.read_message().await?;
-            if msg.get("id").and_then(|v| v.as_u64()) == Some(id) {
-                if let Some(error) = msg.get("error") {
-                    return Err(format!("JSON-RPC error: {error}"));
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let msg = self.read_message().await?;
+                if msg.get("id").and_then(|v| v.as_u64()) == Some(id) {
+                    if let Some(error) = msg.get("error") {
+                        return Err(format!("JSON-RPC error: {error}"));
+                    }
+                    return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
                 }
-                return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
             }
-        }
+        })
+        .await
+        .map_err(|_| format!("timeout waiting for response: method={method}, id={id}"))?
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).

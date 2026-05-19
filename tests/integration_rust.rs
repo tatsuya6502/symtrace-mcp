@@ -310,8 +310,16 @@ async fn test_rename() {
     let text = extract_text(&result);
     // Should show the rename changes (workspace edit)
     assert!(
-        text.contains("say_hi") || text.contains("rename") || !text.contains("Error"),
-        "rename should produce changes or confirmation, got: {text}"
+        !text.trim().is_empty(),
+        "rename should return non-empty content"
+    );
+    assert!(
+        !text.to_lowercase().contains("error"),
+        "rename returned an error: {text}"
+    );
+    assert!(
+        text.contains("say_hi") || text.contains("\"changes\"") || text.contains("WorkspaceEdit"),
+        "rename should include edit payload, got: {text}"
     );
 
     client.shutdown().await.unwrap();

@@ -252,7 +252,7 @@ async fn test_rename() {
 
     let text = extract_text(&result);
     assert!(
-        text.contains("sayHello") || text.contains("rename") || !text.contains("Error"),
+        !text.contains("Error") && (text.contains("sayHello") || text.contains("rename")),
         "rename should produce changes or confirmation, got: {text}"
     );
 
