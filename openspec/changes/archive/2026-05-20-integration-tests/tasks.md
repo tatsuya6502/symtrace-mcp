@@ -55,4 +55,4 @@
 - [x] 7.3 Add TypeScript matrix slot: install pinned npm packages, run `cargo test --features integration-typescript`
 - [x] 7.4 Set `fail-fast: false` so one language failure doesn't block the other
 - [x] 7.5 Run `pinact` on both `rust.yml` and `integration.yml` to SHA-pin GHA actions
-- [ ] 7.6 Verify both workflows pass on a test push
+- [x] 7.6 Verify both workflows pass on a test push
