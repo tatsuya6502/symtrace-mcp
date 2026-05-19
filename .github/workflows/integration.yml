@@ -1,0 +1,50 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned versions for supply chain security — update intentionally after review.
+  TYPESCRIPT_LANGUAGE_SERVER: "5.2.0"
+  TYPESCRIPT: "5.8.3"
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: rust
+            feature: integration-rust
+          - language: typescript
+            feature: integration-typescript
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          components: rust-analyzer, rust-src
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Install TypeScript LSP
+        if: matrix.language == 'typescript'
+        run: npm install -g typescript-language-server@${{ env.TYPESCRIPT_LANGUAGE_SERVER }} typescript@${{ env.TYPESCRIPT }}
+
+      - name: Build
+        run: cargo build
+
+      - name: Run integration tests
+        run: cargo test --features ${{ matrix.feature }} -- --test-threads=1

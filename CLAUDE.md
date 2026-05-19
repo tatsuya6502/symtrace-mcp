@@ -12,6 +12,30 @@ cargo fmt --all -- --check
 cargo test
 ```
 
+### Debugging test failures with rtk
+
+`rtk` (Rust Token Killer) filters output to save tokens, which can hide useful diagnostics like compiler warnings or stderr from subprocesses (e.g., rust-analyzer shutdown messages). Use `rtk proxy` to see the full output:
+
+```bash
+rtk proxy cargo test -- --nocapture
+rtk proxy cargo test --features integration-rust -- --test-threads=1 --nocapture
+```
+
+## Integration Tests
+
+Integration tests spawn `symtrace-mcp` + a real LSP server, so they are slow (~60s for Rust, ~250s for TypeScript). Run them only as the final step of an OpenSpec change, not after every edit.
+
+```bash
+# Per-language (install the corresponding LSP server first)
+cargo test --features integration-rust -- --test-threads=1
+cargo test --features integration-typescript -- --test-threads=1
+
+# Both (requires both rust-analyzer and typescript-language-server)
+cargo test --features integration -- --test-threads=1
+```
+
+CI runs integration tests separately in `.github/workflows/integration.yml`.
+
 ## CLI
 
 ```bash

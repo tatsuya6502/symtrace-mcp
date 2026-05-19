@@ -18,7 +18,13 @@ toml = "1.1.2"
 turso = "0.6.0"
 url = "2"
 
+[features]
+integration-rust = []
+integration-typescript = []
+integration = ["integration-rust", "integration-typescript"]
+
 [dev-dependencies]
 filetime = "0.2"
 mockall = "0.14"
 tempfile = "3.27.0"
+which = "7"

@@ -219,18 +219,15 @@ impl LspClientApi for LspClient {
         uri: &str,
         position: super::types::Position,
     ) -> Result<Vec<super::types::Location>, ClientError> {
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": position,
+            "context": { "includeDeclaration": false }
+        });
+
         let result = self
-            .transport
-            .send_request(
-                "textDocument/references",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                    "context": { "includeDeclaration": false }
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .retry_on_transient("textDocument/references", params)
+            .await?;
 
         Ok(parse_location_list(&result))
     }
@@ -294,16 +291,16 @@ impl LspClientApi for LspClient {
             return Ok(self.diagnostics_cache.get(uri).await.unwrap_or_default());
         }
 
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri }
+        });
+
+        // Retry on ServerCancelled (-32802) — servers like rust-analyzer cancel
+        // diagnostics when they're busy indexing. The LSP spec expects clients
+        // to retry in this case.
         let result = self
-            .transport
-            .send_request(
-                "textDocument/diagnostic",
-                serde_json::json!({
-                    "textDocument": { "uri": uri }
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .retry_on_transient("textDocument/diagnostic", params)
+            .await?;
 
         if result.is_null() {
             return Ok(Vec::new());
@@ -539,6 +536,31 @@ impl LspClient {
         provider_enabled(&self.capabilities.call_hierarchy_provider)
     }
 
+    /// Send an LSP request, retrying on transient errors.
+    ///
+    /// Retries up to 3 times on ContentModified (-32801) and
+    /// ServerCancelled (-32802) with 500ms delay between attempts.
+    async fn retry_on_transient(&self, method: &str, params: Value) -> Result<Value, ClientError> {
+        const MAX_RETRIES: u32 = 3;
+        let mut result = None;
+        for attempt in 0..=MAX_RETRIES {
+            match self.transport.send_request(method, params.clone()).await {
+                Ok(val) => {
+                    result = Some(val);
+                    break;
+                }
+                Err(super::transport::LspError::JsonRpc {
+                    code: -32801 | -32802,
+                    ..
+                }) if attempt < MAX_RETRIES => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                Err(e) => return Err(ClientError::Transport(e.to_string())),
+            }
+        }
+        Ok(result.unwrap())
+    }
+
     /// Send `textDocument/documentSymbol` and return whether the server
     /// appears ready (returns a non-empty result).
     #[allow(dead_code)]
@@ -580,17 +602,51 @@ impl LspClient {
     /// Wait for the language server to finish indexing by polling
     /// `workspace/symbol` with an empty query until a non-empty result arrives.
     ///
-    /// Polls every 500ms with the given overall timeout.
+    /// Polls every 500ms with the given overall timeout. Each individual
+    /// `workspace/symbol` request has a 5-second timeout to prevent hangs
+    /// when the server is slow to respond during startup.
+    ///
+    /// Returns `Ok(())` immediately if the server does not advertise
+    /// `workspaceSymbolProvider` capability. Also returns `Ok(())` after
+    /// 5 consecutive non-success polls (empty results or errors), as this
+    /// indicates the server is responsive but doesn't support the query or
+    /// hasn't loaded a project yet (e.g., typescript-language-server returns
+    /// JSON-RPC error "No Project" before any file is opened via `didOpen`).
+    ///
+    /// An unreachable server is handled by the overall `timeout` — each poll
+    /// is also bounded by `per_request_timeout`, so a truly broken server
+    /// won't trigger the early bailout (it will time out instead).
     pub async fn wait_for_index(&self, timeout: std::time::Duration) -> Result<(), ClientError> {
+        if !provider_enabled(&self.capabilities.workspace_symbol_provider) {
+            return Ok(());
+        }
+
         let start = std::time::Instant::now();
         let poll_interval = std::time::Duration::from_millis(500);
+        let per_request_timeout = std::time::Duration::from_secs(5);
+        let mut fail_count: u32 = 0;
+        const MAX_FAIL_POLLS: u32 = 5;
 
         loop {
-            match self.workspace_symbol("").await {
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                return Err(ClientError::IndexTimeout);
+            }
+            let remaining = timeout - elapsed;
+            let request_timeout = std::cmp::min(per_request_timeout, remaining);
+
+            let result = tokio::time::timeout(request_timeout, self.workspace_symbol(""))
+                .await
+                .unwrap_or(Err(ClientError::Transport(
+                    "workspace/symbol request timed out".into(),
+                )));
+
+            match result {
                 Ok(true) => return Ok(()),
                 Ok(false) | Err(_) => {
-                    if start.elapsed() >= timeout {
-                        return Err(ClientError::IndexTimeout);
+                    fail_count += 1;
+                    if fail_count >= MAX_FAIL_POLLS {
+                        return Ok(());
                     }
                     tokio::time::sleep(poll_interval).await;
                 }

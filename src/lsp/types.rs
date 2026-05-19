@@ -97,6 +97,8 @@ pub struct ServerCapabilities {
     pub call_hierarchy_provider: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diagnostic_provider: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_symbol_provider: Option<Value>,
 }
 
 // --- 2.4 Query-related types ---
