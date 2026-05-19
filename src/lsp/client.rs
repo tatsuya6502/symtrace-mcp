@@ -219,18 +219,15 @@ impl LspClientApi for LspClient {
         uri: &str,
         position: super::types::Position,
     ) -> Result<Vec<super::types::Location>, ClientError> {
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": position,
+            "context": { "includeDeclaration": false }
+        });
+
         let result = self
-            .transport
-            .send_request(
-                "textDocument/references",
-                serde_json::json!({
-                    "textDocument": { "uri": uri },
-                    "position": position,
-                    "context": { "includeDeclaration": false }
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .retry_on_transient("textDocument/references", params)
+            .await?;
 
         Ok(parse_location_list(&result))
     }
@@ -301,27 +298,9 @@ impl LspClientApi for LspClient {
         // Retry on ServerCancelled (-32802) — servers like rust-analyzer cancel
         // diagnostics when they're busy indexing. The LSP spec expects clients
         // to retry in this case.
-        const MAX_RETRIES: u32 = 3;
-        let mut result = None;
-        for attempt in 0..=MAX_RETRIES {
-            match self
-                .transport
-                .send_request("textDocument/diagnostic", params.clone())
-                .await
-            {
-                Ok(val) => {
-                    result = Some(val);
-                    break;
-                }
-                Err(super::transport::LspError::JsonRpc { code: -32802, .. })
-                    if attempt < MAX_RETRIES =>
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
-                Err(e) => return Err(ClientError::Transport(e.to_string())),
-            }
-        }
-        let result = result.unwrap();
+        let result = self
+            .retry_on_transient("textDocument/diagnostic", params)
+            .await?;
 
         if result.is_null() {
             return Ok(Vec::new());
@@ -555,6 +534,31 @@ impl LspClient {
     /// Check whether the language server supports the callHierarchy protocol.
     fn call_hierarchy_supported(&self) -> bool {
         provider_enabled(&self.capabilities.call_hierarchy_provider)
+    }
+
+    /// Send an LSP request, retrying on transient errors.
+    ///
+    /// Retries up to 3 times on ContentModified (-32801) and
+    /// ServerCancelled (-32802) with 500ms delay between attempts.
+    async fn retry_on_transient(&self, method: &str, params: Value) -> Result<Value, ClientError> {
+        const MAX_RETRIES: u32 = 3;
+        let mut result = None;
+        for attempt in 0..=MAX_RETRIES {
+            match self.transport.send_request(method, params.clone()).await {
+                Ok(val) => {
+                    result = Some(val);
+                    break;
+                }
+                Err(super::transport::LspError::JsonRpc {
+                    code: -32801 | -32802,
+                    ..
+                }) if attempt < MAX_RETRIES => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                Err(e) => return Err(ClientError::Transport(e.to_string())),
+            }
+        }
+        Ok(result.unwrap())
     }
 
     /// Send `textDocument/documentSymbol` and return whether the server
