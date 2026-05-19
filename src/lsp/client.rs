@@ -294,16 +294,25 @@ impl LspClientApi for LspClient {
             return Ok(self.diagnostics_cache.get(uri).await.unwrap_or_default());
         }
 
-        let result = self
-            .transport
-            .send_request(
-                "textDocument/diagnostic",
-                serde_json::json!({
-                    "textDocument": { "uri": uri }
-                }),
-            )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri }
+        });
+
+        // Retry on ServerCancelled (-32802) — servers like rust-analyzer cancel
+        // diagnostics when they're busy indexing. The LSP spec expects clients
+        // to retry in this case.
+        const MAX_RETRIES: u32 = 3;
+        let mut result = None;
+        for attempt in 0..=MAX_RETRIES {
+            match self.transport.send_request("textDocument/diagnostic", params.clone()).await {
+                Ok(val) => { result = Some(val); break; }
+                Err(super::transport::LspError::JsonRpc { code: -32802, .. }) if attempt < MAX_RETRIES => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                Err(e) => return Err(ClientError::Transport(e.to_string())),
+            }
+        }
+        let result = result.unwrap();
 
         if result.is_null() {
             return Ok(Vec::new());
