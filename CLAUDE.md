@@ -66,6 +66,10 @@ env = { DATABASE_URL = "postgres://localhost/mydb" }
 
 Feature development follows an OpenSpec workflow. Specs live in `openspec/specs/` and changes in `openspec/changes/`. Each change has a `change.md` (scope + task list) and per-component spec deltas. Completed changes are archived to `openspec/changes/archive/`.
 
+## CHANGELOG
+
+When bumping the version in `Cargo.toml`, update `CHANGELOG.md` with a new version section following the [Keep a Changelog](https://keepachangelog.com/) format. Categorize entries as Added/Changed/Fixed/Removed. Add a comparison link at the bottom.
+
 ## PR Review Workflow
 
 Use `gh pr-review review view --repo tatsuya6502/symtrace-mcp --pr <PR_NUMBER> --unresolved` to view unresolved review comments.
