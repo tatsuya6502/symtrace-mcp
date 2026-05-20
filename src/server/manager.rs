@@ -125,6 +125,7 @@ pub struct LanguageServerManager {
     configs: HashMap<Language, LanguageServerConfig>,
     servers: Mutex<HashMap<Language, ServerEntry>>,
     root: PathBuf,
+    env: HashMap<String, String>,
     monitor: Arc<IdleMonitor>,
     stats: Arc<StatsRecorder>,
 }
@@ -132,18 +133,20 @@ pub struct LanguageServerManager {
 impl LanguageServerManager {
     #[expect(dead_code)]
     pub fn new(root: PathBuf, stats: Arc<StatsRecorder>) -> Self {
-        Self::with_configs(root, default_configs(), stats)
+        Self::with_configs(root, default_configs(), HashMap::new(), stats)
     }
 
     pub fn with_configs(
         root: PathBuf,
         configs: HashMap<Language, LanguageServerConfig>,
+        env: HashMap<String, String>,
         stats: Arc<StatsRecorder>,
     ) -> Self {
         Self {
             configs,
             servers: Mutex::new(HashMap::new()),
             root,
+            env,
             monitor: Arc::new(IdleMonitor::new(stats.clone())),
             stats,
         }
@@ -223,8 +226,14 @@ impl LanguageServerManager {
         let start = std::time::Instant::now();
         let lang_str = format!("{language:?}");
 
-        let client_result =
-            LspClient::start(&cfg.command, &args_from(cfg), &self.root, capabilities).await;
+        let client_result = LspClient::start(
+            &cfg.command,
+            &args_from(cfg),
+            &self.root,
+            capabilities,
+            &self.env,
+        )
+        .await;
 
         match client_result {
             Ok(client) => {
@@ -351,6 +360,7 @@ mod tests {
         let manager = LanguageServerManager::with_configs(
             PathBuf::from("/tmp/test"),
             configs,
+            HashMap::new(),
             test_stats().await.1,
         );
         assert_eq!(

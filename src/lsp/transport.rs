@@ -51,9 +51,11 @@ impl LspTransport {
     pub async fn spawn(
         command: &str,
         args: &[&str],
+        env: &HashMap<String, String>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<(String, Value)>), LspError> {
         let mut child = Command::new(command)
             .args(args)
+            .envs(env)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
