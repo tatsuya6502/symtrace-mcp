@@ -59,6 +59,7 @@ root = "project-a"
 
 [[projects]]
 root = "project-b"
+env = { DATABASE_URL = "postgres://localhost/mydb" }
 ```
 
 ## OpenSpec

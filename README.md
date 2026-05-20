@@ -59,9 +59,11 @@ root = "project-a"
 
 [[projects]]
 root = "project-b"
+env = { DATABASE_URL = "postgres://localhost/mydb" }
 ```
 
 - `[[projects]]` — List of project root directories (relative to the config file). Each gets its own language server.
+- `env` — Optional. Environment variables to set for language servers spawned for this project (augments the parent process environment).
 - `[server.rust]` — Global language server configuration. Optional; defaults to `rust-analyzer` with a 600s idle timeout.
 - `[server.typescript]` — TypeScript language server configuration. Optional; defaults to `typescript-language-server --stdio` with a 600s idle timeout.
 - If `.symtrace.toml` is absent, the server runs in single-project mode using the current directory as the project root.

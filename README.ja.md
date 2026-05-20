@@ -59,9 +59,11 @@ root = "project-a"
 
 [[projects]]
 root = "project-b"
+env = { DATABASE_URL = "postgres://localhost/mydb" }
 ```
 
 - `[[projects]]` — プロジェクトルートディレクトリのリスト（設定ファイルからの相対パス）。それぞれに専用の言語サーバーが割り当てられます。
+- `env` — 省略可能。このプロジェクトの言語サーバーに設定する環境変数（親プロセスの環境に追加・上書き）。
 - `[server.rust]` — グローバルな言語サーバー設定。省略可能。デフォルトは`rust-analyzer`、アイドルタイムアウト600秒。
 - `[server.typescript]` — TypeScript言語サーバー設定。省略可能。デフォルトは`typescript-language-server --stdio`、アイドルタイムアウト600秒。
 - `.symtrace.toml`がない場合、サーバーは現在のディレクトリをプロジェクトルートとしてシングルプロジェクトモードで動作します。

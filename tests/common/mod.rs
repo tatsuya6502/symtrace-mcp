@@ -213,10 +213,7 @@ impl McpClient {
             .write_all(line.as_bytes())
             .await
             .map_err(|e| format!("write: {e}"))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|e| format!("flush: {e}"))?;
+        stdin.flush().await.map_err(|e| format!("flush: {e}"))?;
         Ok(())
     }
 

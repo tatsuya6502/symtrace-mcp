@@ -1,6 +1,6 @@
 [package]
 name = "symtrace-mcp"
-version = "0.5.0"
+version = "0.5.1"
 description = "MCP server that bridges LSP capabilities to AI coding assistants"
 repository = "https://github.com/tatsuya6502/symtrace-mcp"
 edition = "2024"

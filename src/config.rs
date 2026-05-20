@@ -24,6 +24,8 @@ fn default_idle_timeout() -> u64 {
 #[derive(Debug, Deserialize)]
 pub struct ProjectEntry {
     pub root: PathBuf,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 use std::collections::HashMap;
@@ -76,6 +78,7 @@ impl SymtraceConfig {
             server: HashMap::new(),
             projects: vec![ProjectEntry {
                 root: cwd.to_path_buf(),
+                env: HashMap::new(),
             }],
         }
     }
@@ -177,5 +180,49 @@ root = "my-project"
             config.server["typescript"].command,
             "typescript-language-server"
         );
+    }
+
+    #[test]
+    fn load_project_with_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        let mut f = std::fs::File::create(&config_path).unwrap();
+        write!(
+            f,
+            r#"
+[[projects]]
+root = "my-app"
+env = {{ DATABASE_URL = "postgres://localhost/mydb", RUST_LOG = "debug" }}
+"#
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert_eq!(config.projects.len(), 1);
+        assert_eq!(config.projects[0].root, PathBuf::from("my-app"));
+        assert_eq!(
+            config.projects[0].env.get("DATABASE_URL").unwrap(),
+            "postgres://localhost/mydb"
+        );
+        assert_eq!(config.projects[0].env.get("RUST_LOG").unwrap(), "debug");
+    }
+
+    #[test]
+    fn load_project_without_env_backward_compat() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        let mut f = std::fs::File::create(&config_path).unwrap();
+        write!(
+            f,
+            r#"
+[[projects]]
+root = "legacy-project"
+"#
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert_eq!(config.projects.len(), 1);
+        assert!(config.projects[0].env.is_empty());
     }
 }

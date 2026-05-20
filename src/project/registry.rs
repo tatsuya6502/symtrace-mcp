@@ -62,14 +62,16 @@ impl ProjectRegistry {
         stats: Arc<StatsRecorder>,
     ) -> Result<Self, RegistryError> {
         let server_configs = Self::build_server_configs(&config.server);
-        let project_entries = if config.projects.is_empty() {
-            vec![
+        let project_entries: Vec<(PathBuf, HashMap<String, String>)> = if config.projects.is_empty()
+        {
+            vec![(
                 cwd.canonicalize()
                     .map_err(|e| RegistryError::Canonicalization {
                         root: cwd.to_path_buf(),
                         source: e,
                     })?,
-            ]
+                HashMap::new(),
+            )]
         } else {
             config
                 .projects
@@ -81,15 +83,17 @@ impl ProjectRegistry {
                             root: p.root.clone(),
                             source: e,
                         })
+                        .map(|r| (r, p.env.clone()))
                 })
                 .collect::<Result<Vec<_>, _>>()?
         };
 
         let mut managers = HashMap::new();
-        for root in &project_entries {
+        for (root, env) in &project_entries {
             let manager = LanguageServerManager::with_configs(
                 root.clone(),
                 server_configs.clone(),
+                env.clone(),
                 stats.clone(),
             );
             managers.insert(root.clone(), Arc::new(manager));
@@ -222,9 +226,11 @@ mod tests {
             projects: vec![
                 ProjectEntry {
                     root: PathBuf::from("project-a"),
+                    env: HashMap::new(),
                 },
                 ProjectEntry {
                     root: PathBuf::from("project-a/sub-crate"),
+                    env: HashMap::new(),
                 },
             ],
         };

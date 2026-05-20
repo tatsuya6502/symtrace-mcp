@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 
@@ -450,9 +450,10 @@ impl LspClient {
         args: &[&str],
         root: &Path,
         client_capabilities: Value,
+        env: &HashMap<String, String>,
     ) -> Result<Self, ClientError> {
         let root_uri = path_to_uri(root);
-        let (transport, mut notification_rx) = LspTransport::spawn(command, args)
+        let (transport, mut notification_rx) = LspTransport::spawn(command, args, env)
             .await
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
