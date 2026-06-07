@@ -156,7 +156,7 @@ impl McpServer {
 
         // Run retention cleanup on startup (5.1).
         if let Err(e) = self.stats.retention_cleanup().await {
-            eprintln!("stats retention cleanup failed: {e}");
+            tracing::warn!(error = %e, "stats retention cleanup failed");
         }
 
         // Spawn periodic cleanup every 24 hours (5.2).
@@ -166,7 +166,7 @@ impl McpServer {
             loop {
                 interval.tick().await;
                 if let Err(e) = cleanup_stats.retention_cleanup().await {
-                    eprintln!("stats retention cleanup failed: {e}");
+                    tracing::warn!(error = %e, "stats retention cleanup failed");
                 }
             }
         });
@@ -343,7 +343,7 @@ impl McpServer {
             )
             .await
         {
-            eprintln!("stats recording failed: {e}");
+            tracing::warn!(error = %e, "stats recording failed");
         }
 
         response

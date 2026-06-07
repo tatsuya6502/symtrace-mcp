@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -8,6 +9,13 @@ pub struct SymtraceConfig {
     pub server: HashMap<String, ServerConfig>,
     #[serde(default)]
     pub projects: Vec<ProjectEntry>,
+    #[serde(default)]
+    pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct LoggingConfig {
+    pub level: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -27,8 +35,6 @@ pub struct ProjectEntry {
     #[serde(default)]
     pub env: HashMap<String, String>,
 }
-
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -80,6 +86,7 @@ impl SymtraceConfig {
                 root: cwd.to_path_buf(),
                 env: HashMap::new(),
             }],
+            logging: LoggingConfig::default(),
         }
     }
 }
@@ -224,5 +231,58 @@ root = "legacy-project"
         let config = SymtraceConfig::load(&config_path).unwrap();
         assert_eq!(config.projects.len(), 1);
         assert!(config.projects[0].env.is_empty());
+    }
+
+    #[test]
+    fn load_logging_with_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        let mut f = std::fs::File::create(&config_path).unwrap();
+        write!(
+            f,
+            r#"
+[logging]
+level = "debug"
+"#
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert_eq!(config.logging.level.as_deref(), Some("debug"));
+    }
+
+    #[test]
+    fn load_logging_without_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        let mut f = std::fs::File::create(&config_path).unwrap();
+        write!(
+            f,
+            r#"
+[logging]
+"#
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert!(config.logging.level.is_none());
+    }
+
+    #[test]
+    fn load_logging_omitted() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        let mut f = std::fs::File::create(&config_path).unwrap();
+        write!(
+            f,
+            r#"
+[server.rust]
+command = "rust-analyzer"
+"#
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert!(config.logging.level.is_none());
     }
 }

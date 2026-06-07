@@ -240,7 +240,7 @@ impl LanguageServerManager {
                 // Wait for the server to finish indexing (30s timeout).
                 let timeout = std::time::Duration::from_secs(30);
                 if let Err(e) = client.wait_for_index(timeout).await {
-                    eprintln!("[manager] index wait warning: {e}");
+                    tracing::warn!(error = %e, "index wait warning");
                 }
 
                 let duration_ms = start.elapsed().as_millis() as u64;
@@ -257,7 +257,7 @@ impl LanguageServerManager {
                     .record_server_event(&lang_str, "started", Some(duration_ms), None)
                     .await
                 {
-                    eprintln!("stats recording failed: {e}");
+                    tracing::warn!(error = %e, "stats recording failed");
                 }
 
                 Ok(())
@@ -275,7 +275,7 @@ impl LanguageServerManager {
                     )
                     .await
                 {
-                    eprintln!("stats recording failed: {se}");
+                    tracing::warn!(error = %se, "stats recording failed");
                 }
                 Err(ManagerError::StartupFailed(err_msg))
             }
@@ -320,7 +320,7 @@ impl LanguageServerManager {
                     .record_server_event(&lang_str, "stopped", None, Some("session_end"))
                     .await
                 {
-                    eprintln!("stats recording failed: {e}");
+                    tracing::warn!(error = %e, "stats recording failed");
                 }
             }
         }

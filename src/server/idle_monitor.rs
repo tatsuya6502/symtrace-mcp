@@ -54,12 +54,12 @@ impl IdleMonitor {
             };
 
             if should_shutdown {
-                eprintln!("[idle-monitor] shutting down idle {language:?} server");
+                tracing::info!(language = ?language, "shutting down idle server");
                 last_used.remove(&language);
                 drop(last_used);
 
                 if let Err(e) = manager.stop_server(language).await {
-                    eprintln!("[idle-monitor] error shutting down {language:?}: {e}");
+                    tracing::warn!(language = ?language, error = %e, "error shutting down idle server");
                 }
 
                 let lang_str = format!("{language:?}");
@@ -68,7 +68,7 @@ impl IdleMonitor {
                     .record_server_event(&lang_str, "stopped", None, Some("idle_timeout"))
                     .await
                 {
-                    eprintln!("stats recording failed: {e}");
+                    tracing::warn!(error = %e, "stats recording failed");
                 }
 
                 last_used = self.last_used.lock().await;
