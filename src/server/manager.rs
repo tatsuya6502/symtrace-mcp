@@ -297,7 +297,7 @@ impl LanguageServerManager {
                 .record_server_event(&lang_str, "stopped", None, Some("manual"))
                 .await
             {
-                eprintln!("stats recording failed: {e}");
+                tracing::warn!(language = ?language, error = %e, "stats recording failed");
             }
         }
         Ok(())
