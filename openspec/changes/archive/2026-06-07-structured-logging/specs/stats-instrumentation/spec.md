@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Tool call instrumentation
 The system SHALL record a `tool_calls` row for every `tools/call` dispatch in `handle_tools_call`. The row SHALL contain: tool name, target `file_path` (extracted from arguments), `duration_ms` (measured with `Instant::now()` / `elapsed()`), `success` (based on handler result), and `error_msg` (if the handler returned an error). Stats recording failures SHALL be logged via structured logging (`warn!` macro) rather than `eprintln!`.

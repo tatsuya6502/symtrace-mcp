@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Configuration loaded from .symtrace.toml
 The system SHALL read configuration from a `.symtrace.toml` file located in the current working directory (CWD) at startup. The `[server]` section SHALL accept arbitrary language keys including `"rust"` and `"typescript"`. Each key maps to a `ServerConfig` with `command` and optional `idle_timeout_secs`. Each `[[projects]]` entry SHALL accept an optional `env` field as an inline table mapping environment variable names to values. The optional `[logging]` section SHALL accept a `level` field with values: `off`, `error`, `warn`, `info`, `debug`, `trace`, or `tracing-subscriber::filter::Targets` filter syntax. The default value for `level` SHALL be `info`.

@@ -222,6 +222,7 @@ mod tests {
         std::fs::create_dir_all(&sub_crate).unwrap();
 
         let config = SymtraceConfig {
+            logging: Default::default(),
             server: HashMap::new(),
             projects: vec![
                 ProjectEntry {

@@ -1,5 +1,6 @@
 mod config;
 mod language;
+mod logging;
 mod lsp;
 mod mcp;
 mod project;
@@ -50,6 +51,9 @@ fn main() {
 }
 
 async fn run_server(cwd: &std::path::Path) {
+    // Load config first so we can pass the logging level to init_logging().
+    // Config parse errors are fatal and exit immediately (before logging is
+    // available), so they still use eprintln!.
     let config_path = cwd.join(".symtrace.toml");
 
     let config = match SymtraceConfig::load(&config_path) {
@@ -63,22 +67,32 @@ async fn run_server(cwd: &std::path::Path) {
         }
     };
 
+    // Initialize logging — hold the guard for the entire server lifetime
+    // so logs are flushed on drop when the process exits.
+    let _log_guard = logging::init_logging(cwd, config.logging.level.as_deref());
+
+    tracing::info!(
+        cwd = %cwd.display(),
+        pid = std::process::id(),
+        "Server started"
+    );
+
     let stats = match StatsRecorder::new(cwd).await {
         Ok(s) => Arc::new(s),
         Err(e) => {
-            eprintln!("error: failed to initialize stats database: {e}");
+            tracing::error!(error = %e, "failed to initialize stats database");
             std::process::exit(1);
         }
     };
 
     let registry = ProjectRegistry::new(&config, cwd, stats.clone()).unwrap_or_else(|e| {
-        eprintln!("error building project registry: {e}");
+        tracing::error!(error = %e, "error building project registry");
         std::process::exit(1);
     });
 
     let mut server = McpServer::new(registry, stats);
     if let Err(e) = server.run().await {
-        eprintln!("symtrace-mcp error: {e}");
+        tracing::error!(error = %e, "server error");
         std::process::exit(1);
     }
 }

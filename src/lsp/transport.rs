@@ -169,7 +169,7 @@ async fn reader_task(
         let msg = match read_message(&mut reader).await {
             Ok(msg) => msg,
             Err(e) => {
-                eprintln!("[lsp] reader error: {e}");
+                tracing::warn!(error = %e, "LSP reader error");
                 break;
             }
         };
