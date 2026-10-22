@@ -132,12 +132,44 @@ cargo install --path .
 
 Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
 
+### Claude Code integration
+
+Run `setup` once with no Claude Code session open. It installs four things in your per-user Claude Code files:
+
+```bash
+symtrace-mcp setup
+```
+
+| Item | File | What it does |
+|------|------|--------------|
+| prompt | `~/.claude/CLAUDE.md` | A marker block (`<!-- symtrace-mcp:begin -->` … `<!-- symtrace-mcp:end -->`) telling the model to use symtrace-mcp tools before `sb`/`grep` for semantic questions (callers, implementations, definitions, references, types) |
+| explore | `~/.claude/agents/Explore.md` | The same block, because the built-in Explore subagent never sees `CLAUDE.md`. Created with the built-in Explore frontmatter when absent; if the file exists (for example ast-bro's copy), only the block is added |
+| hook | `~/.claude/settings.json` | `PreToolUse` entries for the `Bash` and `Grep` matchers running `symtrace-mcp hook` |
+| mcp | `~/.claude.json` | The `mcpServers.symtrace-mcp` entry |
+
+Why: in Claude Code auto mode the model prefers Bash, so for "who calls X" it reaches for `sb callers` or `grep` and never picks an MCP tool unless an instruction names `sb` explicitly. The block fixes that; the hook reinforces it.
+
+The hook reads each `Bash`/`Grep` call and, when it is `sb callers|callees|implements|impact|trace`, a bare-identifier `grep`/`rg` over source code, or a `Grep` tool call with a bare identifier, lets the call run and attaches a reminder naming the matching symtrace-mcp tool. It never blocks a call. Set `SYMTRACE_HOOK_SRC_DIRS="src|crates"` to change which directories count as source code.
+
+Options:
+
+- `--local`: target the project files instead (`./CLAUDE.md`, `./.claude/agents/Explore.md`, `./.claude/settings.json`, `./.mcp.json`)
+- `--dry-run`: print what would change without writing
+- `--skip-prompt` / `--skip-explore` / `--skip-hook` / `--skip-mcp`: leave that item alone
+- `--force`: replace a block or MCP entry you edited by hand (otherwise `setup` refuses and exits non-zero)
+- `--status`: show `installed` / `outdated` / `modified` / `absent` per item
+- `--uninstall`: remove only what `setup` added; other content in those files is preserved
+
+Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code.
+
 <details>
-  <summary>Claude Code example</summary>
+  <summary>Manual Claude Code setup (without <code>setup</code>)</summary>
 
 ```bash
 claude mcp add --scope user symtrace-mcp -- symtrace-mcp
 ```
+
+</details>
 
 Disable the built-in `rust-analyzer-lsp` plugin to avoid running duplicate language server instances:
 
@@ -154,8 +186,6 @@ Or add the following to `~/.claude/settings.json`:
   }
 }
 ```
-
-</details>
 
 ### Why symtrace-mcp over built-in LSP plugins? *(as of May 2026)*
 

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `symtrace-mcp setup` subcommand that installs the Claude Code integration in one step: a prompt block in `~/.claude/CLAUDE.md` and `~/.claude/agents/Explore.md`, `PreToolUse` hook entries in `~/.claude/settings.json`, and the MCP server entry in `~/.claude.json`; with `--local`, `--dry-run`, `--force`, `--skip-*`, `--status`, `--uninstall`
+- `symtrace-mcp hook` subcommand (Claude Code `PreToolUse` hook) that attaches a reminder to use symtrace-mcp tools when the model runs `sb callers`-style queries or identifier greps over source code
 - Structured JSONL logging to `.symtrace/logs/` via tracing ecosystem (per-invocation files, configurable log level, 7-day cleanup) (#20)
 
 ## [0.5.1] — 2026-05-20

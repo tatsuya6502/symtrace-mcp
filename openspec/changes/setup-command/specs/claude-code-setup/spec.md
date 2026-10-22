@@ -47,7 +47,7 @@ The prompt block written to CLAUDE.md and Explore.md SHALL begin with `<!-- symt
 - **THEN** `setup` replaces the block in place and reports `updated`
 
 ### Requirement: User edits inside the block are protected
-If the body between the markers differs from the template for the version named in the begin marker, or the version is unknown to the binary, `setup` SHALL leave the block unchanged, report the item as `modified (use --force)`, and exit with a non-zero code. With `--force` it SHALL replace the block and report `updated`.
+If the begin marker names the running binary's version and the body between the markers differs from the template, or the begin marker has no parseable version, or the markers are damaged (a begin without an end, or duplicated markers), `setup` SHALL leave the block unchanged, report the item as `modified (use --force)`, and exit with a non-zero code. With `--force` it SHALL replace the block (for damaged markers, the span from the first to the last marker) and report `updated`.
 
 #### Scenario: Edited block without --force
 - **WHEN** the user has changed text inside the symtrace-mcp block and runs `symtrace-mcp setup`
