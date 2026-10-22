@@ -2,8 +2,8 @@
 
 ## 1. Scaffolding
 
-- [ ] 1.1 Enable the `preserve_order` feature on `serde_json` in `Cargo.toml`; verify `cargo build` succeeds and a `serde_json::Map` round-trip test keeps key order
-- [ ] 1.2 Add `setup` and `hook` subcommands to the clap `Commands` enum in `src/main.rs` with the flags from the spec (`--local`, `--dry-run`, `--force`, `--skip-prompt/explore/hook/mcp`, `--uninstall`, `--status`); verify `symtrace-mcp setup --help` and `symtrace-mcp hook --help` print them and neither path calls `init_logging` or `StatsRecorder`
+- [x] 1.1 Enable the `preserve_order` feature on `serde_json` in `Cargo.toml`; verify `cargo build` succeeds and a `serde_json::Map` round-trip test keeps key order
+- [x] 1.2 Add `setup` and `hook` subcommands to the clap `Commands` enum in `src/main.rs` with the flags from the spec (`--local`, `--dry-run`, `--force`, `--skip-prompt/explore/hook/mcp`, `--uninstall`, `--status`); verify `symtrace-mcp setup --help` and `symtrace-mcp hook --help` print them and neither path calls `init_logging` or `StatsRecorder`
 
 ## 2. Hook decision logic
 
