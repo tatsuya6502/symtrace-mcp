@@ -200,16 +200,14 @@ impl LspClientApi for LspClient {
         position: super::types::Position,
     ) -> Result<Vec<super::types::Location>, ClientError> {
         let result = self
-            .transport
-            .send_request(
+            .retry_on_transient(
                 "textDocument/definition",
                 serde_json::json!({
                     "textDocument": { "uri": uri },
                     "position": position,
                 }),
             )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .await?;
 
         Ok(parse_location_list(&result))
     }
@@ -238,16 +236,14 @@ impl LspClientApi for LspClient {
         position: super::types::Position,
     ) -> Result<Vec<super::types::Location>, ClientError> {
         let result = self
-            .transport
-            .send_request(
+            .retry_on_transient(
                 "textDocument/implementation",
                 serde_json::json!({
                     "textDocument": { "uri": uri },
                     "position": position,
                 }),
             )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .await?;
 
         Ok(parse_location_list(&result))
     }
@@ -264,16 +260,14 @@ impl LspClientApi for LspClient {
         }
 
         let result = self
-            .transport
-            .send_request(
+            .retry_on_transient(
                 "textDocument/hover",
                 serde_json::json!({
                     "textDocument": { "uri": uri },
                     "position": position,
                 }),
             )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .await?;
 
         if result.is_null() {
             return Ok(None);
@@ -333,8 +327,7 @@ impl LspClientApi for LspClient {
         }
 
         let result = self
-            .transport
-            .send_request(
+            .retry_on_transient(
                 "textDocument/rename",
                 serde_json::json!({
                     "textDocument": { "uri": uri },
@@ -342,8 +335,7 @@ impl LspClientApi for LspClient {
                     "newName": new_name,
                 }),
             )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .await?;
 
         if result.is_null() {
             return Ok(None);
@@ -367,16 +359,14 @@ impl LspClientApi for LspClient {
         }
 
         let result = self
-            .transport
-            .send_request(
+            .retry_on_transient(
                 "textDocument/prepareCallHierarchy",
                 serde_json::json!({
                     "textDocument": { "uri": uri },
                     "position": position,
                 }),
             )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .await?;
 
         let items: Vec<super::types::CallHierarchyItem> = if result.is_null() {
             Vec::new()
@@ -394,13 +384,11 @@ impl LspClientApi for LspClient {
         item: &super::types::CallHierarchyItem,
     ) -> Result<Vec<super::types::CallHierarchyIncomingCall>, ClientError> {
         let result = self
-            .transport
-            .send_request(
+            .retry_on_transient(
                 "callHierarchy/incomingCalls",
                 serde_json::json!({ "item": item }),
             )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .await?;
 
         let calls: Vec<super::types::CallHierarchyIncomingCall> = if result.is_null() {
             Vec::new()
@@ -418,13 +406,11 @@ impl LspClientApi for LspClient {
         item: &super::types::CallHierarchyItem,
     ) -> Result<Vec<super::types::CallHierarchyOutgoingCall>, ClientError> {
         let result = self
-            .transport
-            .send_request(
+            .retry_on_transient(
                 "callHierarchy/outgoingCalls",
                 serde_json::json!({ "item": item }),
             )
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
+            .await?;
 
         let calls: Vec<super::types::CallHierarchyOutgoingCall> = if result.is_null() {
             Vec::new()
