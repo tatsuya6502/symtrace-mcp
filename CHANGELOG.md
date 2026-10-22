@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `symtrace-mcp hook` subcommand (Claude Code `PreToolUse` hook) that attaches a reminder to use symtrace-mcp tools when the model runs `sb callers`-style queries or identifier greps over source code
 - Structured JSONL logging to `.symtrace/logs/` via tracing ecosystem (per-invocation files, configurable log level, 7-day cleanup) (#20)
 
+### Changed
+
+- JSON objects are now serialized in insertion order instead of sorted key order (`serde_json` `preserve_order`, needed so `setup` keeps the key order of Claude Code's config files). This also affects the `json: true` output of `hover`, `diagnostics` and `rename`; clients must not depend on key order.
+
 ## [0.5.1] — 2026-05-20
 
 ### Added

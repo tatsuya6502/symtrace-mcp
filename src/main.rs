@@ -39,18 +39,20 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
-    let cwd = std::env::current_dir().expect("failed to determine current directory");
+    // Resolved lazily: the `hook` path must never fail, even when the
+    // working directory has been deleted under a running session.
+    let cwd = || std::env::current_dir().expect("failed to determine current directory");
 
     match cli.command {
         None => {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-            rt.block_on(run_server(&cwd));
+            rt.block_on(run_server(&cwd()));
         }
         // `setup` and `hook` are plain CLI paths: no tokio runtime, no logging,
         // no stats database (the hook runs on every Bash/Grep call and must be
         // fast and side-effect free).
         Some(Commands::Setup(args)) => {
-            let code = setup::run(args, &cwd);
+            let code = setup::run(args, &cwd());
             std::process::exit(code);
         }
         Some(Commands::Hook) => {
@@ -64,7 +66,7 @@ fn main() {
             // runtime spawns any worker threads.
             unsafe { std::env::set_var("LIMBO_DISABLE_FILE_LOCK", "1") };
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-            rt.block_on(stats::print_stats(&cwd));
+            rt.block_on(stats::print_stats(&cwd()));
         }
     }
 }

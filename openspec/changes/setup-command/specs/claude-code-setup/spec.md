@@ -69,11 +69,22 @@ If the begin marker names the running binary's version and the body between the 
 - **THEN** the block is replaced with the current template and reported as `updated`
 
 ### Requirement: Explore.md is created with the built-in frontmatter when absent
-When the Explore.md target does not exist, `setup` SHALL create it with YAML frontmatter containing `name: Explore` and the built-in Explore subagent description, followed by the prompt block. When it exists, `setup` SHALL only add or update the prompt block.
+When the Explore.md target does not exist or is empty, `setup` SHALL create it with YAML frontmatter containing `name: Explore`, the built-in Explore subagent description, and `disallowedTools: Write, Edit, NotebookEdit`, followed by the prompt block. A user agent named `Explore` replaces the built-in read-only one and would otherwise inherit every tool.
 
 #### Scenario: Explore.md absent
 - **WHEN** `$HOME/.claude/agents/Explore.md` does not exist
-- **THEN** `setup` creates it with `name: Explore` frontmatter and the block
+- **THEN** `setup` creates it with `name: Explore` frontmatter, the `disallowedTools` line, and the block
+
+#### Scenario: Explore.md empty
+- **WHEN** `Explore.md` exists but is empty
+- **THEN** `setup` writes the frontmatter and the block, so the file is a valid agent definition
+
+### Requirement: Existing Explore.md keeps its frontmatter
+When Explore.md has content that starts with frontmatter, `setup` SHALL only add or update the prompt block. When its content does not start with frontmatter, `setup` SHALL prepend the frontmatter and append the block so the file is a valid agent definition.
+
+#### Scenario: Frontmatter-less Explore.md
+- **WHEN** `Explore.md` contains text that does not start with `---`
+- **THEN** `setup` prepends the frontmatter, keeps the text, appends the block, and reports `updated`
 
 #### Scenario: Explore.md shadowed by another tool
 - **WHEN** `Explore.md` exists and contains another tool's marker block
@@ -94,12 +105,26 @@ When the Explore.md target does not exist, `setup` SHALL create it with YAML fro
 - **WHEN** the settings file exists but cannot be parsed
 - **THEN** `setup` reports an error for the hook item, does not write the file, and continues with the other items
 
+### Requirement: Customized hook commands are still recognized
+An entry whose command ends with `symtrace-mcp hook` (for example with an absolute path or a leading environment assignment) SHALL be recognized as ours, left unchanged by `setup`, and removed by `--uninstall`.
+
+#### Scenario: Customized hook command
+- **WHEN** the `Bash` entry's command is `SYMTRACE_HOOK_SRC_DIRS=src symtrace-mcp hook` or `/home/u/.cargo/bin/symtrace-mcp hook`
+- **THEN** `setup` reports the hook item as `unchanged` and `--uninstall` removes that entry
+
 ### Requirement: MCP server entry is upserted
-`setup` SHALL ensure the MCP config file contains `mcpServers.symtrace-mcp` equal to `{"command": "symtrace-mcp", "args": []}` (global: `$HOME/.claude.json`; local: `./.mcp.json`). Other keys in the file SHALL be preserved. An entry that additionally carries only `"type": "stdio"` and/or an empty `env` (the shape `claude mcp add` writes) SHALL count as equivalent and be left unchanged. Any other difference SHALL be reported as `modified (use --force)`; with `--force` the entry SHALL be replaced.
+`setup` SHALL ensure the MCP config file contains `mcpServers.symtrace-mcp` equal to `{"command": "symtrace-mcp", "args": []}` (global: `$HOME/.claude.json`; local: `./.mcp.json`). Other keys in the file SHALL be preserved. An existing entry that is not equivalent SHALL be reported as `modified (use --force)`; with `--force` the entry SHALL be replaced.
 
 #### Scenario: Fresh MCP registration
 - **WHEN** `$HOME/.claude.json` exists without a `symtrace-mcp` server
 - **THEN** `setup` adds the entry and all other keys remain identical
+
+### Requirement: Equivalent MCP entries are left unchanged
+An entry SHALL count as equivalent when it differs from ours only by `"type": "stdio"` and/or an empty `env` (the shape `claude mcp add` writes), or by a `command` that is a path whose final component is `symtrace-mcp`.
+
+#### Scenario: Entry registered with an absolute path
+- **WHEN** `mcpServers.symtrace-mcp.command` is `/home/u/.cargo/bin/symtrace-mcp`
+- **THEN** `setup` reports `unchanged`
 
 #### Scenario: Entry registered with claude mcp add
 - **WHEN** `mcpServers.symtrace-mcp` is `{"type":"stdio","command":"symtrace-mcp","args":[],"env":{}}`
@@ -108,6 +133,24 @@ When the Explore.md target does not exist, `setup` SHALL create it with YAML fro
 #### Scenario: User-customized MCP entry
 - **WHEN** `mcpServers.symtrace-mcp` exists with an extra `env` field
 - **THEN** `setup` without `--force` leaves it and reports `modified (use --force)`
+
+### Requirement: Files are written atomically with safe permissions
+Every file `setup` writes (markdown and JSON) SHALL be written to a temporary file in the same directory and renamed over the target, so an interrupted run never leaves a truncated file. The temporary file SHALL be created with the target's existing permission bits, or `0600` for a new JSON file and `0644` for a new markdown file, before any content is written.
+
+#### Scenario: New config file permissions
+- **WHEN** `setup` creates `$HOME/.claude.json`
+- **THEN** the file's mode is `0600`
+
+#### Scenario: Existing permissions preserved
+- **WHEN** `settings.json` exists with mode `0644`
+- **THEN** after `setup` it still has mode `0644` and no temporary file remains
+
+### Requirement: CRLF files are handled
+Block classification SHALL compare line contents independent of `\r\n` versus `\n` line endings, and a block inserted into or replaced in a file that uses `\r\n` SHALL be written with `\r\n`.
+
+#### Scenario: CRLF CLAUDE.md with an untouched block
+- **WHEN** `CLAUDE.md` uses CRLF line endings and contains the current block
+- **THEN** `setup` reports `unchanged`
 
 ### Requirement: Dry run reports without writing
 With `--dry-run`, `setup` (including `--uninstall`) SHALL compute and print the result line for every item exactly as a real run would, prefixed with `dry-run`, and SHALL NOT create, modify or delete any file.
@@ -126,6 +169,10 @@ With `--uninstall`, `setup` SHALL remove the prompt block from CLAUDE.md and Exp
 #### Scenario: Uninstall with a shared Explore.md
 - **WHEN** Explore.md also contains another tool's block
 - **THEN** only the symtrace-mcp block is removed and the file is kept
+
+#### Scenario: Key order preserved on uninstall
+- **WHEN** `mcpServers` holds the keys `other`, `symtrace-mcp`, `y`, `zzz` in that order
+- **THEN** after `--uninstall` the file holds `other`, `y`, `zzz` in that order
 
 ### Requirement: Status reports each item
 With `--status`, `setup` SHALL print one line per item with one of `installed`, `modified`, `outdated`, or `absent`, SHALL NOT modify any file, and SHALL exit 0. For the two markdown items the version from the begin marker SHALL be appended (`installed v<version>`, `outdated v<version>`); the hook and MCP items carry no version.
