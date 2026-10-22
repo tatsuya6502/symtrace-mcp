@@ -68,11 +68,15 @@ pub fn find(text: &str) -> Found<'_> {
     if begins.is_empty() && ends.is_empty() {
         return Found::None;
     }
+    // Widest span: from the line start of the first marker to the line end
+    // of the last one. A begin marker runs to the end of its line (its
+    // version suffix has no fixed length); an end marker is the literal.
     let damaged = |text: &str| {
         let first = begins.iter().chain(ends.iter()).copied().min().unwrap_or(0);
+        let first = text[..first].rfind('\n').map_or(0, |i| i + 1);
         let last_marker = begins
             .iter()
-            .map(|&b| b + BEGIN_PREFIX.len())
+            .map(|&b| text[b..].find('\n').map_or(text.len(), |n| b + n))
             .chain(ends.iter().map(|&e| e + END_MARKER.len()))
             .max()
             .unwrap_or(text.len());
@@ -134,7 +138,8 @@ pub fn classify(text: &str, current_version: &str, template: &str) -> State {
             None => State::Modified,
             Some(v) if v != current_version => State::Outdated(v.to_string()),
             Some(_) => {
-                if b.body.trim_end_matches('\n') == template.trim_end_matches('\n') {
+                let body = b.body.replace("\r\n", "\n");
+                if body.trim_end_matches('\n') == template.trim_end_matches('\n') {
                     State::Current
                 } else {
                     State::Modified
@@ -144,29 +149,50 @@ pub fn classify(text: &str, current_version: &str, template: &str) -> State {
     }
 }
 
+/// Line ending `text` uses: CRLF as soon as it contains one, LF otherwise.
+/// The block is rendered with LF and converted on insertion so a CRLF file
+/// stays consistent (and keeps classifying as `Current`).
+pub fn line_ending(text: &str) -> &'static str {
+    if text.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
+/// `block` (rendered with LF) converted to `eol`.
+fn with_line_ending(block: &str, eol: &str) -> String {
+    if eol == "\n" {
+        block.to_string()
+    } else {
+        block.replace('\n', eol)
+    }
+}
+
 /// Append `block` (already rendered) at the end of `text` with exactly one
-/// blank line in between (none when `text` is empty) and a trailing newline.
+/// blank line in between (none when `text` is empty) and a trailing newline,
+/// using the line ending of `text`.
 pub fn insert_at_end(text: &str, block: &str) -> String {
-    let head = text.trim_end_matches('\n');
-    let mut out = String::with_capacity(head.len() + block.len() + 2);
+    let eol = line_ending(text);
+    let head = text.trim_end_matches(['\r', '\n']);
+    let mut out = String::with_capacity(head.len() + block.len() + 4);
     if !head.is_empty() {
         out.push_str(head);
-        out.push_str("\n\n");
+        out.push_str(eol);
+        out.push_str(eol);
     }
-    out.push_str(block);
+    out.push_str(&with_line_ending(block, eol));
     if !out.ends_with('\n') {
-        out.push('\n');
+        out.push_str(eol);
     }
     out
 }
 
-/// Replace the byte range `span` with `block`.
+/// Replace the byte range `span` with `block`, using the line ending of
+/// `text`.
 pub fn replace_span(text: &str, span: (usize, usize), block: &str) -> String {
-    let mut out = String::with_capacity(text.len() + block.len());
+    let eol = line_ending(text);
+    let mut out = String::with_capacity(text.len() + block.len() + 2);
     out.push_str(&text[..span.0]);
-    out.push_str(block);
+    out.push_str(&with_line_ending(block, eol));
     if !out.ends_with('\n') {
-        out.push('\n');
+        out.push_str(eol);
     }
     out.push_str(&text[span.1..]);
     out
@@ -189,7 +215,9 @@ pub fn remove(text: &str) -> Option<String> {
         return None;
     };
     let mut head = &text[..b.start];
-    if head.ends_with("\n\n") {
+    if head.ends_with("\r\n\r\n") {
+        head = &head[..head.len() - 2];
+    } else if head.ends_with("\n\n") {
         head = &head[..head.len() - 1];
     }
     let mut out = String::with_capacity(text.len());
@@ -317,6 +345,99 @@ mod tests {
         let fixed = replace_span(&twice, span, &block());
         assert_eq!(fixed, format!("pre\n{}post\n", block()));
         assert_eq!(classify(&fixed, V, BODY), State::Current);
+    }
+
+    #[test]
+    fn damaged_span_extends_begin_marker_to_line_end() {
+        let stray = format!("{} -->", begin_marker("0.5.1"));
+        // Begin without end: the begin line goes; the old body stays.
+        let text = format!("pre\n{stray}\nold body\npost\n");
+        let Found::Damaged { span } = find(&text) else {
+            panic!("expected damaged")
+        };
+        assert_eq!(&text[..span.0], "pre\n");
+        assert_eq!(&text[span.1..], "old body\npost\n");
+        let fixed = replace_span(&text, span, &block());
+        assert_eq!(fixed, format!("pre\n{}old body\npost\n", block()));
+        assert_eq!(classify(&fixed, V, BODY), State::Current);
+
+        // End before begin: everything between (and both lines) goes.
+        let text = format!("pre\n{END_MARKER}\nmid\n{stray}\npost\n");
+        let Found::Damaged { span } = find(&text) else {
+            panic!("expected damaged")
+        };
+        assert_eq!(&text[..span.0], "pre\n");
+        assert_eq!(&text[span.1..], "post\n");
+        let fixed = replace_span(&text, span, &block());
+        assert_eq!(fixed, format!("pre\n{}post\n", block()));
+        assert_eq!(classify(&fixed, V, BODY), State::Current);
+
+        // A stray begin after a well-formed block.
+        let text = format!("pre\n{}\n{stray}\npost\n", block());
+        let Found::Damaged { span } = find(&text) else {
+            panic!("expected damaged")
+        };
+        assert_eq!(&text[..span.0], "pre\n");
+        assert_eq!(&text[span.1..], "post\n");
+        let fixed = replace_span(&text, span, &block());
+        assert_eq!(fixed, format!("pre\n{}post\n", block()));
+        assert_eq!(classify(&fixed, V, BODY), State::Current);
+
+        // Begin marker at EOF without a newline, and a marker mid-line.
+        let text = format!("pre\n{stray}");
+        let Found::Damaged { span } = find(&text) else {
+            panic!("expected damaged")
+        };
+        assert_eq!(span, (4, text.len()));
+        let text = format!("pre {stray}\npost\n");
+        let Found::Damaged { span } = find(&text) else {
+            panic!("expected damaged")
+        };
+        assert_eq!(span, (0, text.len() - "post\n".len()));
+    }
+
+    #[test]
+    fn crlf_block_classifies_as_current() {
+        let crlf = block().replace('\n', "\r\n");
+        assert_eq!(classify(&crlf, V, BODY), State::Current);
+        let text = format!("# notes\r\n\r\n{crlf}");
+        assert_eq!(classify(&text, V, BODY), State::Current);
+        let edited = crlf.replace("line one", "edited");
+        assert_eq!(classify(&edited, V, BODY), State::Modified);
+        assert_eq!(
+            classify(&render("0.0.1", BODY).replace('\n', "\r\n"), V, BODY),
+            State::Outdated("0.0.1".into())
+        );
+    }
+
+    #[test]
+    fn crlf_file_gets_crlf_block() {
+        let crlf = block().replace('\n', "\r\n");
+        assert_eq!(line_ending("a\r\nb\r\n"), "\r\n");
+        assert_eq!(line_ending("a\nb\n"), "\n");
+        assert_eq!(line_ending(""), "\n");
+
+        let text = insert_at_end("# notes\r\n", &block());
+        assert_eq!(text, format!("# notes\r\n\r\n{crlf}"));
+        assert!(!text.contains("-->\n"), "no bare LF: {text:?}");
+        assert_eq!(classify(&text, V, BODY), State::Current);
+
+        // Replace keeps CRLF too.
+        let old = render("0.0.1", "old\n").replace('\n', "\r\n");
+        let text = format!("head\r\n\r\n{old}\r\ntail\r\n");
+        let new = replace_in_place(&text, &block()).unwrap();
+        assert_eq!(new, format!("head\r\n\r\n{crlf}\r\ntail\r\n"));
+        assert_eq!(classify(&new, V, BODY), State::Current);
+    }
+
+    #[test]
+    fn crlf_remove_leaves_rest_intact() {
+        let text = insert_at_end("# notes\r\nmore\r\n", &block());
+        assert_eq!(remove(&text).unwrap(), "# notes\r\nmore\r\n");
+        let crlf = block().replace('\n', "\r\n");
+        let text = format!("head\r\n\r\n{crlf}\r\ntail\r\n");
+        assert_eq!(remove(&text).unwrap(), "head\r\n\r\ntail\r\n");
+        assert_eq!(remove(&crlf).unwrap(), "");
     }
 
     #[test]

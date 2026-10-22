@@ -6,15 +6,17 @@
 //! back atomically. The mutation helpers are pure functions over `Value`.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
 use super::SetupError;
+use super::atomic_write::write_atomic;
 
-/// The command Claude Code runs for our hook. Also how we recognise our
-/// own entries on re-run and uninstall.
+/// The command Claude Code runs for our hook. An entry is recognised as
+/// ours (on re-run and uninstall) when its command ends with this text and
+/// the binary name is preceded by nothing, a `/` or whitespace, so a user
+/// who prefixed an env var or wrote the absolute path keeps one entry.
 pub const HOOK_COMMAND: &str = "symtrace-mcp hook";
 /// The MCP server name under `mcpServers`.
 pub const MCP_NAME: &str = "symtrace-mcp";
@@ -43,43 +45,14 @@ pub fn load(path: &Path) -> Result<Value, SetupError> {
 }
 
 /// Write `value` pretty-printed (two-space indent, trailing newline) to
-/// `path` atomically: a temp file in the same directory is renamed over the
-/// target. Parent directories are created. The target's permissions are
-/// preserved when it already exists.
+/// `path` atomically (see `atomic_write`). An existing target keeps its
+/// mode; a new file is created `0o600`, since `~/.claude.json` also holds
+/// OAuth state.
 pub fn save(path: &Path, value: &Value) -> Result<(), SetupError> {
-    // Follow a symlinked target (dotfiles repos) so the rename replaces the
-    // real file rather than the link.
-    let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = resolved.as_path();
-    let io = |e: std::io::Error| SetupError::Io(path.to_path_buf(), e);
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
-    if let Some(dir) = dir {
-        fs::create_dir_all(dir).map_err(io)?;
-    }
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "file".into());
-    let tmp = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
     let mut text = serde_json::to_string_pretty(value)
         .map_err(|e| SetupError::JsonParse(path.to_path_buf(), e.to_string()))?;
     text.push('\n');
-
-    let result = (|| {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-        drop(f);
-        if let Ok(meta) = fs::metadata(path) {
-            fs::set_permissions(&tmp, meta.permissions())?;
-        }
-        fs::rename(&tmp, path)
-    })();
-    if let Err(e) = result {
-        let _ = fs::remove_file(&tmp);
-        return Err(io(e));
-    }
-    Ok(())
+    write_atomic(path, text.as_bytes(), 0o600)
 }
 
 /// Result of `upsert_hook`.
@@ -94,7 +67,19 @@ fn our_hook_object() -> Value {
 }
 
 fn is_our_hook(v: &Value) -> bool {
-    v.get("command").and_then(Value::as_str) == Some(HOOK_COMMAND)
+    v.get("command")
+        .and_then(Value::as_str)
+        .is_some_and(is_our_hook_command)
+}
+
+/// `symtrace-mcp hook`, `/abs/path/symtrace-mcp hook`,
+/// `VAR=x symtrace-mcp hook`; not `my-symtrace-mcp hook` or
+/// `symtrace-mcp hook --flag`.
+fn is_our_hook_command(command: &str) -> bool {
+    let Some(prefix) = command.trim().strip_suffix(HOOK_COMMAND) else {
+        return false;
+    };
+    prefix.is_empty() || prefix.ends_with('/') || prefix.ends_with(char::is_whitespace)
 }
 
 fn entry_matcher(entry: &Value) -> Option<&str> {
@@ -161,7 +146,8 @@ pub fn has_hook(root: &Value, matcher: &str) -> Result<bool, SetupError> {
 /// Ensure `hooks.PreToolUse` has an entry
 /// `{"matcher": M, "hooks": [{"type": "command", "command": "symtrace-mcp hook"}]}`.
 /// A matcher entry owned by another tool is never merged into; a new entry
-/// is appended instead.
+/// is appended instead. An entry already recognised as ours is left as
+/// written, even when the user customised its command text.
 pub fn upsert_hook(root: &mut Value, matcher: &str) -> Result<HookChange, SetupError> {
     if has_hook(root, matcher)? {
         return Ok(HookChange::Unchanged);
@@ -173,8 +159,9 @@ pub fn upsert_hook(root: &mut Value, matcher: &str) -> Result<HookChange, SetupE
 
 /// Remove every hook object whose command is ours. A `PreToolUse` entry is
 /// dropped only when its `hooks` array becomes empty; `PreToolUse` and
-/// `hooks` are dropped only when they become empty. Returns whether
-/// anything was removed.
+/// `hooks` are dropped only when they become empty (with `shift_remove`,
+/// so the remaining keys keep their order). Returns whether anything was
+/// removed.
 pub fn remove_hooks(root: &mut Value) -> Result<bool, SetupError> {
     let Some(entries) = pre_tool_use_mut(root, false)? else {
         return Ok(false);
@@ -202,10 +189,10 @@ pub fn remove_hooks(root: &mut Value) -> Result<bool, SetupError> {
             .and_then(Value::as_array)
             .is_some_and(Vec::is_empty)
         {
-            hooks.remove("PreToolUse");
+            hooks.shift_remove("PreToolUse");
         }
         if hooks.is_empty() {
-            obj.remove("hooks");
+            obj.shift_remove("hooks");
         }
     }
     Ok(true)
@@ -218,19 +205,26 @@ pub fn mcp_entry() -> Value {
 
 /// Whether an existing entry is equivalent to ours. `claude mcp add` writes
 /// `{"type":"stdio","command":…,"args":[],"env":{}}`, so an explicit stdio
-/// type and an empty env are accepted as the same registration; anything
-/// else (other command, arguments, env vars, extra keys) counts as modified.
+/// type and an empty env are accepted as the same registration, and the
+/// command may be the bare name or an absolute path to it (as `claude mcp
+/// add -- /home/u/.cargo/bin/symtrace-mcp` writes); anything else (other
+/// binary, arguments, env vars, extra keys) counts as modified.
 fn is_equivalent_mcp_entry(v: &Value) -> bool {
     let Some(obj) = v.as_object() else {
         return false;
     };
     obj.iter().all(|(k, v)| match k.as_str() {
-        "command" => v == "symtrace-mcp",
+        "command" => v.as_str().is_some_and(is_our_binary),
         "args" => v.as_array().is_some_and(Vec::is_empty),
         "type" => v == "stdio",
         "env" => v.as_object().is_some_and(Map::is_empty),
         _ => false,
     }) && obj.get("command").is_some()
+}
+
+/// `symtrace-mcp` itself or a path whose final component is `symtrace-mcp`.
+fn is_our_binary(command: &str) -> bool {
+    Path::new(command).file_name() == Some(std::ffi::OsStr::new(MCP_NAME))
 }
 
 /// State of `mcpServers.symtrace-mcp`.
@@ -311,13 +305,13 @@ pub fn remove_mcp(root: &mut Value) -> Result<bool, SetupError> {
     let Some(servers) = mcp_servers_mut(root, false)? else {
         return Ok(false);
     };
-    if servers.remove(MCP_NAME).is_none() {
+    if servers.shift_remove(MCP_NAME).is_none() {
         return Ok(false);
     }
     if servers.is_empty() {
         root.as_object_mut()
             .expect("checked above")
-            .remove("mcpServers");
+            .shift_remove("mcpServers");
     }
     Ok(true)
 }
@@ -465,13 +459,111 @@ mod tests {
         for modified in [
             json!({ "type": "sse", "command": "symtrace-mcp", "args": [] }),
             json!({ "command": "symtrace-mcp", "args": ["--foo"] }),
-            json!({ "command": "/opt/symtrace-mcp", "args": [] }),
+            json!({ "command": "/opt/other-binary", "args": [] }),
+            json!({ "command": "my-symtrace-mcp", "args": [] }),
             json!({ "command": "symtrace-mcp", "args": [], "env": { "A": "1" } }),
             json!({ "command": "symtrace-mcp", "args": [], "cwd": "/x" }),
             json!({ "args": [] }),
         ] {
             let v = json!({ "mcpServers": { MCP_NAME: modified } });
             assert_eq!(mcp_state(&v).unwrap(), McpState::Modified, "{v}");
+        }
+    }
+
+    #[test]
+    fn mcp_entry_with_absolute_path_is_current() {
+        // `claude mcp add -- /home/u/.cargo/bin/symtrace-mcp` writes the path.
+        for cmd in [
+            "/home/u/.cargo/bin/symtrace-mcp",
+            "symtrace-mcp",
+            "./target/debug/symtrace-mcp",
+        ] {
+            let entry = json!({ "type": "stdio", "command": cmd, "args": [], "env": {} });
+            let mut v = json!({ "mcpServers": { MCP_NAME: entry.clone() } });
+            assert_eq!(mcp_state(&v).unwrap(), McpState::Current, "{cmd}");
+            assert_eq!(upsert_mcp(&mut v, false).unwrap(), McpChange::Unchanged);
+            // `--force` must not downgrade the path to the bare name.
+            assert_eq!(upsert_mcp(&mut v, true).unwrap(), McpChange::Unchanged);
+            assert_eq!(v["mcpServers"][MCP_NAME], entry, "{cmd}");
+        }
+        let v = json!({ "mcpServers": { MCP_NAME: { "command": "/opt/other-binary" } } });
+        assert_eq!(mcp_state(&v).unwrap(), McpState::Modified);
+    }
+
+    #[test]
+    fn remove_mcp_keeps_key_order() {
+        // `Map::remove` is `swap_remove` under preserve_order; compare the
+        // serialised text, since `Value` equality ignores order.
+        let mut v = json!({ "mcpServers": {
+            "other": { "command": "o" }, MCP_NAME: mcp_entry(), "y": {}, "zzz": {}
+        } });
+        assert!(remove_mcp(&mut v).unwrap());
+        assert_eq!(
+            serde_json::to_string(&v).unwrap(),
+            r#"{"mcpServers":{"other":{"command":"o"},"y":{},"zzz":{}}}"#
+        );
+        // Dropping an emptied `mcpServers` keeps the surrounding order too.
+        let mut v =
+            json!({ "first": 1, "mcpServers": { MCP_NAME: mcp_entry() }, "mid": 2, "last": 3 });
+        assert!(remove_mcp(&mut v).unwrap());
+        assert_eq!(
+            serde_json::to_string(&v).unwrap(),
+            r#"{"first":1,"mid":2,"last":3}"#
+        );
+    }
+
+    #[test]
+    fn remove_hooks_keeps_key_order() {
+        let mut v = json!({ "first": 1, "hooks": {}, "mid": 2, "last": 3 });
+        upsert_hook(&mut v, "Bash").unwrap();
+        upsert_hook(&mut v, "Grep").unwrap();
+        assert!(remove_hooks(&mut v).unwrap());
+        assert_eq!(
+            serde_json::to_string(&v).unwrap(),
+            r#"{"first":1,"mid":2,"last":3}"#
+        );
+        // `PreToolUse` pruned inside a `hooks` that keeps other events.
+        let mut v = json!({ "hooks": { "Stop": [], "PreToolUse": [], "PostToolUse": [] } });
+        upsert_hook(&mut v, "Bash").unwrap();
+        assert!(remove_hooks(&mut v).unwrap());
+        assert_eq!(
+            serde_json::to_string(&v).unwrap(),
+            r#"{"hooks":{"Stop":[],"PostToolUse":[]}}"#
+        );
+    }
+
+    #[test]
+    fn customised_hook_command_is_still_ours() {
+        for cmd in [
+            "SYMTRACE_HOOK_SRC_DIRS=src symtrace-mcp hook",
+            "/home/u/.cargo/bin/symtrace-mcp hook",
+            "  symtrace-mcp hook\n",
+        ] {
+            let mut v = json!({ "hooks": { "PreToolUse": [
+                { "matcher": "Bash", "hooks": [ { "type": "command", "command": cmd } ] }
+            ] } });
+            let before = v.clone();
+            assert!(has_hook(&v, "Bash").unwrap(), "{cmd:?}");
+            assert_eq!(
+                upsert_hook(&mut v, "Bash").unwrap(),
+                HookChange::Unchanged,
+                "{cmd:?}"
+            );
+            assert_eq!(v, before, "customisation kept as written: {cmd:?}");
+            assert!(remove_hooks(&mut v).unwrap(), "{cmd:?}");
+            assert_eq!(v, json!({}), "{cmd:?}");
+        }
+        for cmd in [
+            "my-symtrace-mcp hook",
+            "symtrace-mcp hook --flag",
+            "symtrace-mcp",
+            "hook",
+        ] {
+            assert!(!is_our_hook_command(cmd), "{cmd:?}");
+            let v = json!({ "hooks": { "PreToolUse": [
+                { "matcher": "Bash", "hooks": [ { "type": "command", "command": cmd } ] }
+            ] } });
+            assert!(!has_hook(&v, "Bash").unwrap(), "{cmd:?}");
         }
     }
 
@@ -550,6 +642,25 @@ mod tests {
         fs::write(&path, "{}").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         save(&path, &json!({ "a": 1 })).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        // An existing world-readable settings.json stays that way.
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        save(&path, &json!({ "a": 1 })).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_creates_new_file_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        save(&path, &json!({ "mcpServers": {} })).unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
     }

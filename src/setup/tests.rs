@@ -96,6 +96,9 @@ fn embedded_prompt_has_all_six_tools() {
     }
     assert!(!PROMPT.contains("symtrace-mcp:begin"));
     assert!(EXPLORE_FRONTMATTER.starts_with("---\nname: Explore\ndescription: "));
+    // A user agent named Explore shadows the built-in one and would inherit
+    // every tool without this line.
+    assert!(EXPLORE_FRONTMATTER.contains("\ndisallowedTools: Write, Edit, NotebookEdit\n"));
     assert!(EXPLORE_FRONTMATTER.trim_end().ends_with("\n---"));
 }
 
@@ -282,6 +285,179 @@ fn explore_shadowed_by_other_tool_gets_appended_block() {
         read(&e.targets.explore_md),
         format!("{original}\n{}", block())
     );
+}
+
+#[test]
+fn empty_explore_md_gets_frontmatter_and_is_deleted_on_uninstall() {
+    for seed in ["", "  \n\n"] {
+        let e = env();
+        fs::create_dir_all(e.targets.explore_md.parent().unwrap()).unwrap();
+        fs::write(&e.targets.explore_md, seed).unwrap();
+        let r = execute(&args(), &e.targets);
+        assert_eq!(statuses(&r)[1], ("explore", "created"), "{seed:?}");
+        assert_eq!(
+            read(&e.targets.explore_md),
+            format!("{EXPLORE_FRONTMATTER}\n{}", block())
+        );
+        let r = execute(
+            &SetupArgs {
+                uninstall: true,
+                ..args()
+            },
+            &e.targets,
+        );
+        assert_eq!(statuses(&r)[1], ("explore", "removed"));
+        assert!(!e.targets.explore_md.exists(), "deleted: {seed:?}");
+    }
+}
+
+#[test]
+fn frontmatterless_explore_md_gets_frontmatter_prepended() {
+    let e = env();
+    fs::create_dir_all(e.targets.explore_md.parent().unwrap()).unwrap();
+    fs::write(&e.targets.explore_md, "\nMy notes.\n").unwrap();
+    let r = execute(&args(), &e.targets);
+    assert_eq!(statuses(&r)[1], ("explore", "updated"));
+    let expected = format!("{EXPLORE_FRONTMATTER}\nMy notes.\n\n{}", block());
+    assert_eq!(read(&e.targets.explore_md), expected);
+    assert!(read(&e.targets.explore_md).starts_with("---\nname: Explore\n"));
+    let r = execute(&args(), &e.targets);
+    assert_eq!(statuses(&r)[1], ("explore", "unchanged"));
+    // Uninstall keeps the user's notes (now under our frontmatter).
+    let r = execute(
+        &SetupArgs {
+            uninstall: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    assert_eq!(statuses(&r)[1], ("explore", "removed"));
+    assert_eq!(
+        read(&e.targets.explore_md),
+        format!("{EXPLORE_FRONTMATTER}\nMy notes.\n")
+    );
+}
+
+#[test]
+fn crlf_claude_md_stays_crlf_and_unchanged_on_rerun() {
+    let e = env();
+    fs::create_dir_all(e.targets.claude_md.parent().unwrap()).unwrap();
+    fs::write(&e.targets.claude_md, "# notes\r\nline\r\n").unwrap();
+    let r = execute(&args(), &e.targets);
+    assert_eq!(statuses(&r)[0], ("prompt", "created"));
+    let text = read(&e.targets.claude_md);
+    assert_eq!(
+        text,
+        format!("# notes\r\nline\r\n\r\n{}", block().replace('\n', "\r\n"))
+    );
+    assert!(!text.replace("\r\n", "").contains('\n'), "no bare LF");
+    let r = execute(&args(), &e.targets);
+    assert_eq!(statuses(&r)[0], ("prompt", "unchanged"));
+    let r = execute(
+        &SetupArgs {
+            status: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    assert_eq!(statuses(&r)[0].1, format!("installed v{VERSION}"));
+    let r = execute(
+        &SetupArgs {
+            uninstall: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    assert_eq!(statuses(&r)[0], ("prompt", "removed"));
+    assert_eq!(read(&e.targets.claude_md), "# notes\r\nline\r\n");
+}
+
+#[test]
+fn markdown_writes_leave_no_temp_file() {
+    let e = env();
+    execute(&args(), &e.targets);
+    // Modify CLAUDE.md in place (outdated → updated) and uninstall; every
+    // write goes through the temp file + rename path.
+    let old = super::marker_block::render("0.0.1", "old\n");
+    fs::write(&e.targets.claude_md, format!("# mine\n\n{old}")).unwrap();
+    execute(&args(), &e.targets);
+    execute(
+        &SetupArgs {
+            uninstall: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    let mut names: Vec<_> = fs::read_dir(e.home.join(".claude"))
+        .unwrap()
+        .map(|d| d.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["CLAUDE.md", "agents", "settings.json"]);
+    assert_eq!(
+        fs::read_dir(e.home.join(".claude/agents")).unwrap().count(),
+        0
+    );
+    assert_eq!(read(&e.targets.claude_md), "# mine\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn file_modes_on_fresh_install() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env();
+    execute(&args(), &e.targets);
+    let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode(&e.targets.mcp_json),
+        0o600,
+        ".claude.json holds OAuth state"
+    );
+    assert_eq!(mode(&e.targets.settings_json), 0o600);
+    for p in [&e.targets.claude_md, &e.targets.explore_md] {
+        let m = mode(p);
+        assert_eq!(m & 0o600, 0o600, "{}: {m:o}", p.display());
+        assert_eq!(m & 0o133, 0, "{}: {m:o}", p.display());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn existing_file_modes_are_kept() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = env();
+    fs::create_dir_all(e.targets.settings_json.parent().unwrap()).unwrap();
+    fs::write(
+        &e.targets.settings_json,
+        "{\"first\":1,\"hooks\":{},\"mid\":2,\"last\":3}",
+    )
+    .unwrap();
+    fs::set_permissions(&e.targets.settings_json, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::write(&e.targets.claude_md, "# notes\n").unwrap();
+    fs::set_permissions(&e.targets.claude_md, fs::Permissions::from_mode(0o600)).unwrap();
+    execute(&args(), &e.targets);
+    let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&e.targets.settings_json), 0o644);
+    assert_eq!(mode(&e.targets.claude_md), 0o600);
+    // Key order survives install and uninstall (`hooks` pruned in place).
+    let text = read(&e.targets.settings_json);
+    let pos = |k: &str| text.find(&format!("\"{k}\"")).unwrap();
+    assert!(
+        pos("first") < pos("hooks") && pos("hooks") < pos("mid") && pos("mid") < pos("last"),
+        "{text}"
+    );
+    execute(
+        &SetupArgs {
+            uninstall: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    assert_eq!(
+        read(&e.targets.settings_json),
+        "{\n  \"first\": 1,\n  \"mid\": 2,\n  \"last\": 3\n}\n"
+    );
+    assert_eq!(mode(&e.targets.settings_json), 0o644);
 }
 
 #[test]

@@ -5,6 +5,7 @@
 //! subagent file, PreToolUse hook entries in settings.json, and the MCP
 //! server entry.
 
+mod atomic_write;
 mod json_file;
 mod marker_block;
 mod preflight;
@@ -23,7 +24,9 @@ use targets::Targets;
 
 /// Body of the prompt block (no markers).
 pub const PROMPT: &str = include_str!("setup/prompt.md");
-/// YAML frontmatter written when Explore.md is created from scratch.
+/// YAML frontmatter written when Explore.md is created from scratch (or
+/// has none). A user agent named `Explore` replaces the built-in one, so it
+/// must say which tools it may not use; without that line it inherits all.
 pub const EXPLORE_FRONTMATTER: &str = include_str!("setup/explore_frontmatter.md");
 /// Version written into the begin marker.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -247,15 +250,14 @@ fn read_optional(path: &Path) -> Result<Option<String>, SetupError> {
     }
 }
 
+/// Write a markdown file atomically (temp file + rename, see
+/// `atomic_write`), so a crash never leaves a truncated CLAUDE.md. A new
+/// file is created `0o644`; an existing one keeps its mode.
 fn write_text(ctx: &Ctx, path: &Path, old: Option<&str>, new: &str) -> Result<(), SetupError> {
     if !ctx.write || old == Some(new) {
         return Ok(());
     }
-    let io = |e: std::io::Error| SetupError::Io(path.to_path_buf(), e);
-    if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        fs::create_dir_all(dir).map_err(io)?;
-    }
-    fs::write(path, new).map_err(io)
+    atomic_write::write_atomic(path, new.as_bytes(), 0o644)
 }
 
 fn prompt_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
@@ -266,9 +268,15 @@ fn explore_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError
     markdown_item(ctx, path, mode, Some(EXPLORE_FRONTMATTER))
 }
 
-/// Shared logic for CLAUDE.md and Explore.md. `frontmatter` is written
-/// when the file is created, and its presence alone allows deletion on
-/// uninstall.
+/// Is `text` (the file minus our block) nothing but our Explore frontmatter?
+fn is_our_frontmatter(text: &str, frontmatter: &str) -> bool {
+    text.trim_end() == frontmatter.trim_end()
+}
+
+/// Shared logic for CLAUDE.md and Explore.md. `frontmatter` (Explore.md
+/// only) is written when the file is empty or has no frontmatter of its
+/// own; on uninstall the file is deleted when nothing but whitespace or our
+/// frontmatter would remain.
 fn markdown_item(
     ctx: &Ctx,
     path: &Path,
@@ -290,13 +298,21 @@ fn markdown_item(
             let block = block();
             let (new, status) = match state {
                 State::Current => return Ok("unchanged".into()),
-                State::Absent => {
-                    let base = match (existing.as_deref(), frontmatter) {
-                        (None, Some(fm)) => fm,
-                        _ => text,
-                    };
-                    (marker_block::insert_at_end(base, &block), "created")
-                }
+                State::Absent => match frontmatter {
+                    // Missing, empty or whitespace-only: our frontmatter + block.
+                    Some(fm) if text.trim().is_empty() => {
+                        (marker_block::insert_at_end(fm, &block), "created")
+                    }
+                    // Content without a frontmatter would be an invalid
+                    // agent file once we append the block: prepend ours.
+                    Some(fm) if !text.trim_start().starts_with("---") => {
+                        let eol = marker_block::line_ending(text);
+                        let fm = fm.replace('\n', eol);
+                        let base = format!("{fm}{eol}{}", text.trim_start_matches(['\r', '\n']));
+                        (marker_block::insert_at_end(&base, &block), "updated")
+                    }
+                    _ => (marker_block::insert_at_end(text, &block), "created"),
+                },
                 State::Outdated(_) => (
                     marker_block::replace_in_place(text, &block).expect("classified as a block"),
                     "updated",
@@ -325,8 +341,9 @@ fn markdown_item(
                 Found::Damaged { .. } => return Err(SetupError::DamagedMarkers),
                 Found::Block(_) => marker_block::remove(text).expect("block found"),
             };
-            let only_frontmatter = frontmatter.is_some_and(|fm| new.trim_end() == fm.trim_end());
-            if only_frontmatter {
+            let delete =
+                frontmatter.is_some_and(|fm| new.trim().is_empty() || is_our_frontmatter(&new, fm));
+            if delete {
                 if ctx.write {
                     fs::remove_file(path).map_err(|e| SetupError::Io(path.to_path_buf(), e))?;
                 }
