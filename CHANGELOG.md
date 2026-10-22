@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-23
+
 ### Added
 
 - `symtrace-mcp setup` subcommand that installs the Claude Code integration in one step: a prompt block in `~/.claude/CLAUDE.md` and `~/.claude/agents/Explore.md`, `PreToolUse` hook entries in `~/.claude/settings.json`, and the MCP server entry in `~/.claude.json`; with `--local`, `--dry-run`, `--force`, `--skip-*`, `--status`, `--uninstall`
@@ -50,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README roadmap table, CI badges, and plugin conflict documentation (#12)
 - Claude Code LSP plugins investigation document (#13)
 
-[Unreleased]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.1.0...v0.5.0
 [0.1.0]: https://github.com/tatsuya6502/symtrace-mcp/releases/tag/v0.1.0
