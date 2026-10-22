@@ -64,8 +64,6 @@ const GREP_VALUE_LONG: &[&str] = &[
     "--include",
     "--exclude",
     "--exclude-dir",
-    "--color",
-    "--colour",
 ];
 /// Additional value-taking short options of `rg`.
 const RG_VALUE_SHORT: &[char] = &['g', 't', 'T', 'E', 'M', 'j', 'r'];
@@ -82,6 +80,10 @@ const RG_VALUE_LONG: &[&str] = &[
     "--max-depth",
     "--sort",
     "--sortr",
+    // `rg --color WHEN` takes a separate value; GNU grep / ugrep only accept
+    // the attached form `--color[=WHEN]`, so a bare `--color` is a flag there.
+    "--color",
+    "--colour",
 ];
 
 /// What the hook detected in a tool call.
@@ -646,7 +648,10 @@ mod tests {
             ("grep --max-count 1 Foo src/", ident("Foo")),
             ("grep --include *.rs -r Foo src/", ident("Foo")),
             ("grep --exclude-dir target -r Foo src/", ident("Foo")),
-            ("grep --color always Foo src/", ident("Foo")),
+            ("rg --color always Foo src/", ident("Foo")),
+            // bare `--color` is a plain flag for grep: `Foo` stays the pattern
+            ("grep -rn --color Foo src/", ident("Foo")),
+            ("grep --color -rn Foo src/", ident("Foo")),
             ("rg -t rust Foo src/", ident("Foo")),
             ("rg -T js Foo src/", ident("Foo")),
             ("rg -g '*.rs' Foo src/", ident("Foo")),
