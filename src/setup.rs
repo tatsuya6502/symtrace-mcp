@@ -7,6 +7,7 @@
 
 mod json_file;
 mod marker_block;
+mod preflight;
 mod targets;
 #[cfg(test)]
 mod tests;
@@ -112,6 +113,14 @@ pub fn run(args: SetupArgs, cwd: &Path) -> i32 {
             }
         }
     };
+    // Installing registers the bare command name; make sure Claude Code
+    // will resolve it to this binary.
+    if !args.status
+        && !args.uninstall
+        && let Some(w) = preflight::warning()
+    {
+        eprintln!("warning: {w}");
+    }
     run_with_targets(&args, &targets)
 }
 

@@ -216,6 +216,23 @@ pub fn mcp_entry() -> Value {
     json!({ "command": "symtrace-mcp", "args": [] })
 }
 
+/// Whether an existing entry is equivalent to ours. `claude mcp add` writes
+/// `{"type":"stdio","command":…,"args":[],"env":{}}`, so an explicit stdio
+/// type and an empty env are accepted as the same registration; anything
+/// else (other command, arguments, env vars, extra keys) counts as modified.
+fn is_equivalent_mcp_entry(v: &Value) -> bool {
+    let Some(obj) = v.as_object() else {
+        return false;
+    };
+    obj.iter().all(|(k, v)| match k.as_str() {
+        "command" => v == "symtrace-mcp",
+        "args" => v.as_array().is_some_and(Vec::is_empty),
+        "type" => v == "stdio",
+        "env" => v.as_object().is_some_and(Map::is_empty),
+        _ => false,
+    }) && obj.get("command").is_some()
+}
+
 /// State of `mcpServers.symtrace-mcp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpState {
@@ -269,7 +286,7 @@ pub fn mcp_state(root: &Value) -> Result<McpState, SetupError> {
     };
     Ok(match servers.get(MCP_NAME) {
         None => McpState::Absent,
-        Some(v) if *v == mcp_entry() => McpState::Current,
+        Some(v) if is_equivalent_mcp_entry(v) => McpState::Current,
         Some(_) => McpState::Modified,
     })
 }
@@ -430,6 +447,32 @@ mod tests {
         let bad = json!({ "mcpServers": 3 });
         assert!(mcp_state(&bad).is_err());
         assert!(upsert_mcp(&mut bad.clone(), false).is_err());
+    }
+
+    #[test]
+    fn mcp_entry_written_by_claude_mcp_add_is_current() {
+        // `claude mcp add --scope user symtrace-mcp -- symtrace-mcp` writes this shape.
+        let mut v = json!({ "mcpServers": { MCP_NAME: {
+            "type": "stdio", "command": "symtrace-mcp", "args": [], "env": {}
+        } } });
+        assert_eq!(mcp_state(&v).unwrap(), McpState::Current);
+        assert_eq!(upsert_mcp(&mut v, false).unwrap(), McpChange::Unchanged);
+        assert_eq!(
+            v["mcpServers"][MCP_NAME]["type"], "stdio",
+            "left as written"
+        );
+
+        for modified in [
+            json!({ "type": "sse", "command": "symtrace-mcp", "args": [] }),
+            json!({ "command": "symtrace-mcp", "args": ["--foo"] }),
+            json!({ "command": "/opt/symtrace-mcp", "args": [] }),
+            json!({ "command": "symtrace-mcp", "args": [], "env": { "A": "1" } }),
+            json!({ "command": "symtrace-mcp", "args": [], "cwd": "/x" }),
+            json!({ "args": [] }),
+        ] {
+            let v = json!({ "mcpServers": { MCP_NAME: modified } });
+            assert_eq!(mcp_state(&v).unwrap(), McpState::Modified, "{v}");
+        }
     }
 
     #[test]

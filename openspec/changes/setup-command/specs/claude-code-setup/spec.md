@@ -42,6 +42,17 @@ The prompt block written to CLAUDE.md and Explore.md SHALL begin with `<!-- symt
 - **WHEN** `CLAUDE.md` already contains user text and another tool's marker block
 - **THEN** after `setup` the file equals the original content followed by the symtrace-mcp block
 
+#### Scenario: Trailing blank lines before the block
+- **WHEN** the existing content ends with more than one newline
+- **THEN** the block is separated from it by exactly one blank line, and removing the block later leaves the content with a single trailing newline
+
+### Requirement: setup warns when PATH does not resolve to the running binary
+Because the hook and MCP entries use the bare command `symtrace-mcp`, `setup` (install mode, including `--dry-run`) SHALL print a warning on stderr when no `symtrace-mcp` executable is on `PATH`, or when the one found differs from the executable running `setup`. The warning SHALL NOT change the exit code or skip any item.
+
+#### Scenario: Running setup from a build directory
+- **WHEN** `target/debug/symtrace-mcp setup` is run while an older `symtrace-mcp` is on `PATH`
+- **THEN** a warning names both paths and advises reinstalling, and the items are still installed
+
 #### Scenario: Older block is upgraded
 - **WHEN** the file contains a block whose marker version differs from the running binary's version and whose body matches that older template
 - **THEN** `setup` replaces the block in place and reports `updated`
@@ -84,11 +95,15 @@ When the Explore.md target does not exist, `setup` SHALL create it with YAML fro
 - **THEN** `setup` reports an error for the hook item, does not write the file, and continues with the other items
 
 ### Requirement: MCP server entry is upserted
-`setup` SHALL ensure the MCP config file contains `mcpServers.symtrace-mcp` equal to `{"command": "symtrace-mcp", "args": []}` (global: `$HOME/.claude.json`; local: `./.mcp.json`). Other keys in the file SHALL be preserved. An existing `symtrace-mcp` entry with a different `command` or `args` SHALL be left as is and reported as `modified (use --force)`; with `--force` it SHALL be replaced.
+`setup` SHALL ensure the MCP config file contains `mcpServers.symtrace-mcp` equal to `{"command": "symtrace-mcp", "args": []}` (global: `$HOME/.claude.json`; local: `./.mcp.json`). Other keys in the file SHALL be preserved. An entry that additionally carries only `"type": "stdio"` and/or an empty `env` (the shape `claude mcp add` writes) SHALL count as equivalent and be left unchanged. Any other difference SHALL be reported as `modified (use --force)`; with `--force` the entry SHALL be replaced.
 
 #### Scenario: Fresh MCP registration
 - **WHEN** `$HOME/.claude.json` exists without a `symtrace-mcp` server
 - **THEN** `setup` adds the entry and all other keys remain identical
+
+#### Scenario: Entry registered with claude mcp add
+- **WHEN** `mcpServers.symtrace-mcp` is `{"type":"stdio","command":"symtrace-mcp","args":[],"env":{}}`
+- **THEN** `setup` reports `unchanged` and `--status` reports `installed`
 
 #### Scenario: User-customized MCP entry
 - **WHEN** `mcpServers.symtrace-mcp` exists with an extra `env` field
@@ -113,7 +128,7 @@ With `--uninstall`, `setup` SHALL remove the prompt block from CLAUDE.md and Exp
 - **THEN** only the symtrace-mcp block is removed and the file is kept
 
 ### Requirement: Status reports each item
-With `--status`, `setup` SHALL print one line per item with one of `installed v<version>`, `modified`, `outdated v<version>`, or `absent`, SHALL NOT modify any file, and SHALL exit 0.
+With `--status`, `setup` SHALL print one line per item with one of `installed`, `modified`, `outdated`, or `absent`, SHALL NOT modify any file, and SHALL exit 0. For the two markdown items the version from the begin marker SHALL be appended (`installed v<version>`, `outdated v<version>`); the hook and MCP items carry no version.
 
 #### Scenario: Partially installed
 - **WHEN** the block is in CLAUDE.md but the hook and MCP entries are missing

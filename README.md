@@ -160,7 +160,7 @@ Options:
 - `--status`: show `installed` / `outdated` / `modified` / `absent` per item
 - `--uninstall`: remove only what `setup` added; other content in those files is preserved
 
-Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code.
+Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code: run `cargo install --path .` before `setup`. If `PATH` resolves to a different binary than the one running `setup` (for example an older install while you run `target/debug/symtrace-mcp`), `setup` prints a warning; an old binary without the `hook` subcommand would make Claude Code block every `Bash` and `Grep` call.
 
 <details>
   <summary>Manual Claude Code setup (without <code>setup</code>)</summary>
