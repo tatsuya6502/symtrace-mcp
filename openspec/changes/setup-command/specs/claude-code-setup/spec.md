@@ -86,6 +86,17 @@ When Explore.md has content that starts with frontmatter, `setup` SHALL only add
 - **WHEN** `Explore.md` contains text that does not start with `---`
 - **THEN** `setup` prepends the frontmatter, keeps the text, appends the block, and reports `updated`
 
+### Requirement: setup warns when Explore.md has no tool restriction
+After installing or reporting status, `setup` SHALL print a warning on stderr when the Explore.md frontmatter contains neither a `tools:` nor a `disallowedTools:` line, naming the file and the line to add. The warning SHALL NOT change the exit code, and `setup` SHALL NOT edit frontmatter it did not write.
+
+#### Scenario: ast-bro's Explore.md
+- **WHEN** `Explore.md` was created by another tool with only `name` and `description` in its frontmatter
+- **THEN** `setup` adds its block, reports the item normally, and prints a warning recommending `disallowedTools: Write, Edit, NotebookEdit`
+
+#### Scenario: Restricted Explore.md
+- **WHEN** the frontmatter already has a `tools:` or `disallowedTools:` line
+- **THEN** no warning is printed
+
 #### Scenario: Explore.md shadowed by another tool
 - **WHEN** `Explore.md` exists and contains another tool's marker block
 - **THEN** `setup` appends the symtrace-mcp block after the existing content and leaves the other block intact

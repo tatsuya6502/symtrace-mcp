@@ -143,7 +143,7 @@ symtrace-mcp setup
 | Item | File | What it does |
 |------|------|--------------|
 | prompt | `~/.claude/CLAUDE.md` | A marker block (`<!-- symtrace-mcp:begin v=<version> -->` … `<!-- symtrace-mcp:end -->`) telling the model to use symtrace-mcp tools before `sb`/`grep` for semantic questions (callers, implementations, definitions, references, types) |
-| explore | `~/.claude/agents/Explore.md` | The same block, because the built-in Explore subagent never sees `CLAUDE.md`. Created with the built-in Explore frontmatter when absent; if the file exists (for example ast-bro's copy), only the block is added |
+| explore | `~/.claude/agents/Explore.md` | The same block, because the built-in Explore subagent never sees `CLAUDE.md`. Created with the built-in Explore frontmatter plus `disallowedTools: Write, Edit, NotebookEdit` when absent; if the file exists (for example ast-bro's copy), only the block is added, and `setup` warns when that file's frontmatter has no `tools:`/`disallowedTools:` line, because a user agent named Explore replaces the built-in read-only one and would inherit every tool |
 | hook | `~/.claude/settings.json` | `PreToolUse` entries for the `Bash` and `Grep` matchers running `symtrace-mcp hook` |
 | mcp | `~/.claude.json` | The `mcpServers.symtrace-mcp` entry |
 

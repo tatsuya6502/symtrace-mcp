@@ -133,6 +133,9 @@ pub fn run_with_targets(args: &SetupArgs, targets: &Targets) -> i32 {
     for line in &report.lines {
         println!("{line}");
     }
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
     report.exit_code
 }
 
@@ -163,6 +166,8 @@ impl std::fmt::Display for ItemLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub lines: Vec<ItemLine>,
+    /// Advisory messages printed to stderr; they never change the exit code.
+    pub warnings: Vec<String>,
     pub exit_code: i32,
 }
 
@@ -227,7 +232,47 @@ pub fn execute(args: &SetupArgs, targets: &Targets) -> Report {
         });
     }
     let exit_code = if failed && mode != Mode::Status { 1 } else { 0 };
-    Report { lines, exit_code }
+
+    // Another tool's (or a hand-written) Explore.md may lack a tool
+    // restriction; we never edit foreign frontmatter, so say so instead.
+    let mut warnings = Vec::new();
+    if !args.skip_explore
+        && mode != Mode::Uninstall
+        && let Some(w) = explore_tools_warning(&targets.explore_md)
+    {
+        warnings.push(w);
+    }
+
+    Report {
+        lines,
+        warnings,
+        exit_code,
+    }
+}
+
+/// Warn when the Explore subagent file has frontmatter with neither
+/// `tools:` nor `disallowedTools:`. A user agent named `Explore` replaces
+/// the built-in read-only one and, without a restriction, inherits every
+/// tool (the frontmatter `setup` writes carries `disallowedTools`).
+fn explore_tools_warning(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let body = text.trim_start();
+    let rest = body.strip_prefix("---")?;
+    let end = rest.find("\n---")?;
+    let restricted = rest[..end]
+        .lines()
+        .map(str::trim_start)
+        .any(|l| l.starts_with("tools:") || l.starts_with("disallowedTools:"));
+    if restricted {
+        return None;
+    }
+    Some(format!(
+        "{}: the Explore subagent frontmatter has neither `tools:` nor \
+         `disallowedTools:`. A user agent named Explore replaces the built-in \
+         read-only one and inherits every tool, including Write and Edit. Add \
+         `disallowedTools: Write, Edit, NotebookEdit` to the frontmatter.",
+        path.display()
+    ))
 }
 
 struct Ctx {

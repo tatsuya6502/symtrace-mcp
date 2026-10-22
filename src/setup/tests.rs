@@ -662,6 +662,73 @@ fn uninstall_preserves_surrounding_content() {
 }
 
 #[test]
+fn explore_md_without_tool_restriction_warns() {
+    // ast-bro's installer writes only name + description.
+    let e = env();
+    fs::create_dir_all(e.targets.explore_md.parent().unwrap()).unwrap();
+    let foreign = "---\nname: Explore\ndescription: Fast read-only search agent.\n---\n\n\
+                   <!-- ast-bro:begin v=4.2.0 -->\nuse sb\n<!-- ast-bro:end -->\n";
+    fs::write(&e.targets.explore_md, foreign).unwrap();
+
+    let r = execute(&args(), &e.targets);
+    assert_eq!(statuses(&r)[1], ("explore", "created"));
+    assert_eq!(r.exit_code, 0);
+    assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+    assert!(r.warnings[0].contains("disallowedTools: Write, Edit, NotebookEdit"));
+    assert!(r.warnings[0].contains(&e.targets.explore_md.display().to_string()));
+    // The foreign frontmatter is left exactly as it was.
+    assert!(read(&e.targets.explore_md).starts_with(foreign));
+
+    // --status warns too; --uninstall and --skip-explore do not.
+    let status = execute(
+        &SetupArgs {
+            status: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    assert_eq!(status.warnings.len(), 1);
+    let skipped = execute(
+        &SetupArgs {
+            skip_explore: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    assert!(skipped.warnings.is_empty());
+    let uninstall = execute(
+        &SetupArgs {
+            uninstall: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    assert!(uninstall.warnings.is_empty());
+}
+
+#[test]
+fn restricted_explore_md_does_not_warn() {
+    let e = env();
+    // Fresh install writes our frontmatter, which carries disallowedTools.
+    let r = execute(&args(), &e.targets);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+
+    // A `tools:` allow-list counts as a restriction as well.
+    fs::write(
+        &e.targets.explore_md,
+        "---\nname: Explore\n  tools: Read, Grep, Glob\n---\n",
+    )
+    .unwrap();
+    let r = execute(&args(), &e.targets);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+
+    // A missing file produces no warning (it is created with our frontmatter).
+    fs::remove_file(&e.targets.explore_md).unwrap();
+    let r = execute(&args(), &e.targets);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+}
+
+#[test]
 fn uninstall_with_shared_explore_md_keeps_file() {
     let e = env();
     fs::create_dir_all(e.targets.explore_md.parent().unwrap()).unwrap();
