@@ -1,10 +1,12 @@
 mod config;
+mod hook;
 mod language;
 mod logging;
 mod lsp;
 mod mcp;
 mod project;
 mod server;
+mod setup;
 mod stats;
 mod uri;
 
@@ -27,16 +29,35 @@ struct Cli {
 enum Commands {
     /// Print usage statistics for the current project
     Stats,
+    /// Install, inspect or remove the Claude Code integration
+    /// (CLAUDE.md block, Explore.md block, PreToolUse hook, MCP server entry)
+    Setup(setup::SetupArgs),
+    /// Claude Code PreToolUse hook: read one event from stdin and print a
+    /// reminder to use symtrace-mcp tools when a text-search heuristic is used
+    Hook,
 }
 
 fn main() {
     let cli = Cli::parse();
-    let cwd = std::env::current_dir().expect("failed to determine current directory");
+    // Resolved lazily: the `hook` path must never fail, even when the
+    // working directory has been deleted under a running session.
+    let cwd = || std::env::current_dir().expect("failed to determine current directory");
 
     match cli.command {
         None => {
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-            rt.block_on(run_server(&cwd));
+            rt.block_on(run_server(&cwd()));
+        }
+        // `setup` and `hook` are plain CLI paths: no tokio runtime, no logging,
+        // no stats database (the hook runs on every Bash/Grep call and must be
+        // fast and side-effect free).
+        Some(Commands::Setup(args)) => {
+            let code = setup::run(args, &cwd());
+            std::process::exit(code);
+        }
+        Some(Commands::Hook) => {
+            let code = hook::run();
+            std::process::exit(code);
         }
         Some(Commands::Stats) => {
             // The MCP server holds fcntl locks on WAL files. Disabling
@@ -45,7 +66,7 @@ fn main() {
             // runtime spawns any worker threads.
             unsafe { std::env::set_var("LIMBO_DISABLE_FILE_LOCK", "1") };
             let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-            rt.block_on(stats::print_stats(&cwd));
+            rt.block_on(stats::print_stats(&cwd()));
         }
     }
 }

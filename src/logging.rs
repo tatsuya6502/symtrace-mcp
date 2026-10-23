@@ -143,7 +143,8 @@ fn parse_filter(level_str: &str) -> tracing_subscriber::filter::Targets {
 
     // Fall back to info if parsing fails
     eprintln!("warning: invalid log level '{level_str}', falling back to 'info'");
-    tracing_subscriber::filter::Targets::new().with_default(tracing::level_filters::LevelFilter::INFO)
+    tracing_subscriber::filter::Targets::new()
+        .with_default(tracing::level_filters::LevelFilter::INFO)
 }
 
 /// Format current UTC time as `YYYY-MM-DD_HHmmss` without external crates.
