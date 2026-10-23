@@ -1,4 +1,9 @@
-## MODIFIED Requirements
+# server-manager Specification
+
+## Purpose
+Manages the lifecycle of the language servers for one project, holding each client as `Box<dyn LspClientApi>` and spawning it with the project's environment variables, so production clients and test mocks share one dispatch path.
+
+## Requirements
 
 ### Requirement: Language server lifecycle management
 `LanguageServerManager` SHALL manage language server lifecycle. `ServerEntry` SHALL hold the client as `Box<dyn LspClientApi>` instead of `LspClient`, enabling trait-object dispatch for both production clients and test mocks. The manager SHALL store per-project environment variables and pass them to the LSP client when spawning a server.

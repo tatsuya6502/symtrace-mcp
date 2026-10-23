@@ -1,3 +1,8 @@
+# stats-cli Specification
+
+## Purpose
+Provides the `symtrace-mcp stats` subcommand that reads the project's stats database and prints a 7-day summary of tool usage, top files, and language server events, so the developer can see how the server is actually used.
+
 ## Requirements
 
 ### Requirement: stats subcommand

@@ -1,3 +1,8 @@
+# structured-logging Specification
+
+## Purpose
+Writes structured JSONL log events to a per-invocation file under `.symtrace/logs/` through a non-blocking `tracing` subscriber, keeping stdout and stderr free for the MCP protocol while making post-mortem debugging possible.
+
 ## Requirements
 
 ### Requirement: Logging initialization

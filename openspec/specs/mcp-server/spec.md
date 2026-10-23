@@ -1,4 +1,9 @@
-## MODIFIED Requirements
+# mcp-server Specification
+
+## Purpose
+Provides the MCP server framework that exposes tools to AI agents over stdio on a tokio runtime, with a tool registry that routes calls through `ProjectRegistry` and clap subcommand dispatch for the stats CLI.
+
+## Requirements
 
 ### Requirement: MCP tool registry supports dynamic registration
 The tool system SHALL provide a registry where tool handlers can be registered by name. Each handler accepts parameters as `serde_json::Value` and returns a result as `serde_json::Value`. Tool handlers SHALL receive `Arc<ProjectRegistry>` instead of `Arc<LanguageServerManager>` for file routing.

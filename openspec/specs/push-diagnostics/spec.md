@@ -1,4 +1,9 @@
-## ADDED Requirements
+# push-diagnostics Specification
+
+## Purpose
+Caches `textDocument/publishDiagnostics` notifications per file with a TTL so that the `diagnostic` query works for servers without pull diagnostics (such as typescript-language-server), while servers that support pull diagnostics are queried directly.
+
+## Requirements
 
 ### Requirement: LspClient caches push diagnostics via moka future::Cache
 The system SHALL maintain a `moka::future::Cache<String, Vec<Diagnostic>>` on each `LspClient` instance, keyed by file URI. The cache SHALL have a configurable TTL (default 600 seconds, matching idle timeout). When the cache expires or the server restarts (idle shutdown), cached diagnostics are discarded.

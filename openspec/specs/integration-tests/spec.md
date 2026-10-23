@@ -1,4 +1,9 @@
-## ADDED Requirements
+# integration-tests Specification
+
+## Purpose
+Exercises the full stack end to end by spawning `symtrace-mcp` as a subprocess and driving every MCP tool against real language servers on fixture projects, so that protocol regressions invisible to unit tests are caught in CI.
+
+## Requirements
 
 ### Requirement: MCP subprocess test harness
 The integration test harness SHALL spawn `symtrace-mcp` as a subprocess with piped stdin/stdout and provide JSON-RPC message transport (Content-Length framing, request/response ID matching).

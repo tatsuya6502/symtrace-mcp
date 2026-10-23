@@ -1,4 +1,9 @@
-## ADDED Requirements
+# tools-definitions Specification
+
+## Purpose
+Defines the MCP tool schemas and handler functions that translate tool calls into LSP queries through `dyn LspClientApi`, so the dispatch logic is unit-testable with mocks.
+
+## Requirements
 
 ### Requirement: Handler query dispatch is testable with mocks
 Handler functions (`find_references`, `goto_definition`, `find_implementations`, `hover`, `diagnostics`, `rename`, `incoming_calls`, `outgoing_calls`) SHALL dispatch LSP queries through `dyn LspClientApi`. This enables unit tests that inject `MockLspClientApi` without spawning a real language server.

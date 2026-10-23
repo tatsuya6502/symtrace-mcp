@@ -1,3 +1,8 @@
+# stats-storage Specification
+
+## Purpose
+Persists usage statistics in a per-project Turso database at `.symtrace/stats.db` through a shared `Database` handle with multiprocess WAL, so the MCP server and the stats CLI can access it concurrently, and prunes rows older than 30 days.
+
 ## Requirements
 
 ### Requirement: Stats database location

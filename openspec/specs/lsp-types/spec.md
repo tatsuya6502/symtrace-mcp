@@ -1,4 +1,9 @@
-## ADDED Requirements
+# lsp-types Specification
+
+## Purpose
+Defines the serde-serializable LSP protocol types (positions, locations, initialize, server capabilities, diagnostics, call hierarchy, workspace edits) that the transport and client exchange with language servers.
+
+## Requirements
 
 ### Requirement: Core position and range types
 The system SHALL define `Position { line: u32, character: u32 }` (0-based) and `Range { start: Position, end: Position }` matching the LSP specification.
