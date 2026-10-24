@@ -635,11 +635,12 @@ impl LspClient {
 }
 
 /// Resolve when the watched state changes. If the sender is gone (the
-/// notification task ended), never resolve, so a `select!` does not spin.
-async fn state_changed(state: &mut watch::Receiver<IndexState>) {
-    if state.changed().await.is_err() {
-        std::future::pending::<()>().await;
-    }
+/// notification task ended because the server stopped), return an error so
+/// the wait fails instead of registering a dead server.
+async fn state_changed(state: &mut watch::Receiver<IndexState>) -> Result<(), ClientError> {
+    state.changed().await.map_err(|_| {
+        ClientError::Transport("language server stopped before reporting its status".into())
+    })
 }
 
 /// Wait until the reported state is `Ready` or `deadline` passes.
@@ -714,7 +715,11 @@ where
                 ClientError::Transport("workspace/symbol request timed out".into()),
             )),
             // A status arrived: abandon the poll and wait for quiescence.
-            () = state_changed(&mut state) => continue,
+            // A closed sender means the server stopped: fail the wait.
+            changed = state_changed(&mut state) => {
+                changed?;
+                continue;
+            }
         };
 
         match result {
@@ -735,7 +740,7 @@ where
                     std::cmp::min(tokio::time::Instant::now() + POLL_INTERVAL, deadline);
                 tokio::select! {
                     () = tokio::time::sleep_until(sleep_until) => {}
-                    () = state_changed(&mut state) => {}
+                    changed = state_changed(&mut state) => changed?,
                 }
             }
         }
@@ -1234,6 +1239,37 @@ mod tests {
 
         assert!(matches!(result, Err(ClientError::Transport(_))));
         assert_eq!(start.elapsed(), Duration::from_secs(5));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_server_stopped_before_first_status_fails() {
+        // No status was ever reported (polling path); the sender drops after
+        // two empty polls because the server died. The wait must fail rather
+        // than end with Ok after five empty polls.
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let start = tokio::time::Instant::now();
+        let (result, ()) = tokio::join!(
+            wait_for_index_with(
+                rx,
+                true,
+                counting_poll(&polls, false),
+                Duration::from_secs(30)
+            ),
+            async move {
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                drop(tx);
+            }
+        );
+
+        assert!(matches!(result, Err(ClientError::Transport(_))));
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(polls.load(Ordering::SeqCst) < 5);
     }
 
     #[tokio::test(start_paused = true)]
