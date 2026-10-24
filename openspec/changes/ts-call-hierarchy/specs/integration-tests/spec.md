@@ -28,3 +28,7 @@ Integration tests for each language SHALL test all 8 tools: `find_references`, `
 #### Scenario: outgoing_calls returns callees
 - **WHEN** `outgoing_calls` is called with `json: true` on a fixture function that calls another function, for either language
 - **THEN** the response SHALL succeed and contain at least one callee
+
+#### Scenario: TypeScript call hierarchy crosses file boundaries
+- **WHEN** `incoming_calls` is called on a function exported from one TypeScript fixture file and called from another fixture file that imports it
+- **THEN** the response SHALL contain a caller located in the importing file

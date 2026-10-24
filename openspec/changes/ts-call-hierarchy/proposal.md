@@ -10,7 +10,7 @@ The main spec already requires the TypeScript `initialize` request to include ca
 
 - Declare `textDocument.callHierarchy` (`dynamicRegistration: false`) in the client capabilities sent to typescript-language-server, so it advertises `callHierarchyProvider` and the existing call hierarchy path works unchanged.
 - Declare the same capability for rust-analyzer. rust-analyzer advertises call hierarchy regardless, so Rust behaviour does not change; the point is that every language declares the client capabilities the tools rely on.
-- Add TypeScript integration tests for `incoming_calls` and `outgoing_calls`, and remove the incorrect comment saying they are tested only with rust-analyzer.
+- Add TypeScript integration tests for `incoming_calls` and `outgoing_calls` that cross a file boundary (the real-world failure was an imported hook), and remove the incorrect comment saying they are tested only with rust-analyzer.
 - No change to the "call hierarchy not supported" error: it still applies to servers that do not advertise the capability.
 
 ## Capabilities
@@ -29,6 +29,6 @@ Not touched, because their behaviour does not change: `lsp-client` ("Call hierar
 ## Impact
 
 - Code: `src/language/typescript.rs` and `src/language/rust.rs` (`client_capabilities()`), plus unit tests there.
-- Tests: `tests/integration_ts.rs` (two new tests, comment removed); possibly `fixtures/ts-project/index.ts` (append-only) if the existing call graph does not give a non-empty outgoing result.
+- Tests: `tests/integration_ts.rs` (two new tests, comment removed); `fixtures/ts-project/` gains a second module `caller.ts` that imports from `index.ts`, an appended `export` line in `index.ts`, and `caller.ts` in `tsconfig.json` `include`. Existing line/column positions in `index.ts` are unchanged.
 - Users: `incoming_calls` / `outgoing_calls` start working on TypeScript and JavaScript files with typescript-language-server >= 3.0.0 and TypeScript >= 3.8. No API or configuration change.
 - Docs: `CHANGELOG.md` Fixed entry.
