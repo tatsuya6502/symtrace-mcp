@@ -218,6 +218,12 @@ impl StatsRecorder {
         Ok(())
     }
 
+    /// Database handle for tests outside this module that inspect inserted rows.
+    #[cfg(test)]
+    pub(crate) fn db_for_test(&self) -> &turso::Database {
+        &self.db
+    }
+
     pub async fn retention_cleanup(&self) -> Result<(), turso::Error> {
         let conn = self.db.connect()?;
         conn.execute(
@@ -396,6 +402,42 @@ mod tests {
         assert_eq!(top_files[0].calls, 3);
         assert_eq!(top_files[1].file_path, "src/lib.rs");
         assert_eq!(top_files[1].calls, 1);
+    }
+
+    #[tokio::test]
+    async fn server_usage_sums_stopped_durations() {
+        let dir = tempfile::tempdir().unwrap();
+        let recorder = test_recorder(dir.path()).await;
+
+        recorder
+            .record_server_event("rust", "started", Some(2_000), None)
+            .await
+            .unwrap();
+        recorder
+            .record_server_event("rust", "stopped", Some(3_600_000), Some("idle_timeout"))
+            .await
+            .unwrap();
+        recorder
+            .record_server_event("rust", "started", Some(1_000), None)
+            .await
+            .unwrap();
+        recorder
+            .record_server_event("rust", "stopped", Some(1_800_000), Some("session_end"))
+            .await
+            .unwrap();
+        // A row written before stop durations were recorded contributes zero.
+        recorder
+            .record_server_event("rust", "stopped", None, Some("manual"))
+            .await
+            .unwrap();
+
+        let reader = ReadonlyStatsRecorder::open(dir.path()).await.unwrap();
+        let usage = reader.query_server_usage().await.unwrap();
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].language, "rust");
+        assert_eq!(usage[0].startups, 2);
+        assert_eq!(usage[0].avg_startup_ms, 1_500);
+        assert_eq!(usage[0].total_uptime_secs, 5_400);
     }
 
     #[tokio::test]

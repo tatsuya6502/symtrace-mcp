@@ -5,23 +5,20 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::time;
 
-use super::manager::Language;
-use crate::stats::StatsRecorder;
+use super::manager::{Language, StopReason};
 
 const DEFAULT_CHECK_INTERVAL_SECS: u64 = 60;
 
 pub struct IdleMonitor {
     last_used: Mutex<HashMap<Language, Instant>>,
     check_interval: Duration,
-    stats: Arc<StatsRecorder>,
 }
 
 impl IdleMonitor {
-    pub fn new(stats: Arc<StatsRecorder>) -> Self {
+    pub fn new() -> Self {
         Self {
             last_used: Mutex::new(HashMap::new()),
             check_interval: Duration::from_secs(DEFAULT_CHECK_INTERVAL_SECS),
-            stats,
         }
     }
 
@@ -58,17 +55,11 @@ impl IdleMonitor {
                 last_used.remove(&language);
                 drop(last_used);
 
-                if let Err(e) = manager.stop_server(language).await {
-                    tracing::warn!(language = ?language, error = %e, "error shutting down idle server");
-                }
-
-                let lang_str = format!("{language:?}");
-                if let Err(e) = self
-                    .stats
-                    .record_server_event(&lang_str, "stopped", None, Some("idle_timeout"))
+                if let Err(e) = manager
+                    .stop_server_with_reason(language, StopReason::IdleTimeout)
                     .await
                 {
-                    tracing::warn!(error = %e, "stats recording failed");
+                    tracing::warn!(language = ?language, error = %e, "error shutting down idle server");
                 }
 
                 last_used = self.last_used.lock().await;
