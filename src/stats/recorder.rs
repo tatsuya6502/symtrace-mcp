@@ -5,8 +5,13 @@ use turso::Builder;
 ///
 /// Holds a shared `Database` handle built with multiprocess WAL support.
 /// Each operation creates a fresh `Connection` via `db.connect()`.
+///
+/// If the database cannot be opened at startup (for example, it is locked by
+/// another symtrace-mcp process), the recorder is *disabled* (`db` is `None`):
+/// every write and the retention cleanup return `Ok(())` without touching the
+/// database, so callers never log a per-call warning.
 pub struct StatsRecorder {
-    db: turso::Database,
+    db: Option<turso::Database>,
 }
 
 /// Read-only handle to the stats database, exposed to the CLI.
@@ -136,8 +141,26 @@ impl ReadonlyStatsRecorder {
 }
 
 impl StatsRecorder {
-    pub async fn new(project_root: &Path) -> Result<Self, turso::Error> {
+    /// Open the stats database under `<project_root>/.symtrace/stats.db`.
+    ///
+    /// Never fails: if the database cannot be opened or initialized, a single
+    /// warning is logged and a disabled recorder is returned.
+    pub async fn new(project_root: &Path) -> Self {
         let db_path = project_root.join(".symtrace").join("stats.db");
+        match Self::open(&db_path).await {
+            Ok(db) => Self { db: Some(db) },
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    path = %db_path.display(),
+                    "failed to open stats database; usage statistics are disabled for this session"
+                );
+                Self { db: None }
+            }
+        }
+    }
+
+    async fn open(db_path: &Path) -> Result<turso::Database, turso::Error> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 turso::Error::Error(format!("failed to create stats directory: {e}"))
@@ -150,13 +173,25 @@ impl StatsRecorder {
         .build()
         .await?;
 
-        let recorder = Self { db };
-        recorder.ensure_schema().await?;
-        Ok(recorder)
+        Self::ensure_schema(&db).await?;
+        Ok(db)
     }
 
-    async fn ensure_schema(&self) -> Result<(), turso::Error> {
-        let conn = self.db.connect()?;
+    /// Database handle for tests outside this module that inspect inserted rows.
+    #[cfg(test)]
+    fn db_for_test(&self) -> &turso::Database {
+        self.db
+            .as_ref()
+            .expect("stats recorder is disabled; no database available")
+    }
+
+    #[cfg(test)]
+    fn is_enabled(&self) -> bool {
+        self.db.is_some()
+    }
+
+    async fn ensure_schema(db: &turso::Database) -> Result<(), turso::Error> {
+        let conn = db.connect()?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS tool_calls (\
                 id INTEGER PRIMARY KEY,\
@@ -191,7 +226,10 @@ impl StatsRecorder {
         success: bool,
         error_msg: Option<&str>,
     ) -> Result<(), turso::Error> {
-        let conn = self.db.connect()?;
+        let Some(db) = &self.db else {
+            return Ok(());
+        };
+        let conn = db.connect()?;
         conn.execute(
             "INSERT INTO tool_calls (timestamp, tool, file_path, duration_ms, success, error_msg) \
              VALUES (datetime('now'), ?, ?, ?, ?, ?)",
@@ -208,7 +246,10 @@ impl StatsRecorder {
         duration_ms: Option<u64>,
         detail: Option<&str>,
     ) -> Result<(), turso::Error> {
-        let conn = self.db.connect()?;
+        let Some(db) = &self.db else {
+            return Ok(());
+        };
+        let conn = db.connect()?;
         conn.execute(
             "INSERT INTO server_events (timestamp, language, event, duration_ms, detail) \
              VALUES (datetime('now'), ?, ?, ?, ?)",
@@ -218,14 +259,11 @@ impl StatsRecorder {
         Ok(())
     }
 
-    /// Database handle for tests outside this module that inspect inserted rows.
-    #[cfg(test)]
-    pub(crate) fn db_for_test(&self) -> &turso::Database {
-        &self.db
-    }
-
     pub async fn retention_cleanup(&self) -> Result<(), turso::Error> {
-        let conn = self.db.connect()?;
+        let Some(db) = &self.db else {
+            return Ok(());
+        };
+        let conn = db.connect()?;
         conn.execute(
             "DELETE FROM tool_calls WHERE timestamp < datetime('now', '-30 days')",
             (),
@@ -247,7 +285,9 @@ mod tests {
     use super::*;
 
     async fn test_recorder(dir: &std::path::Path) -> StatsRecorder {
-        StatsRecorder::new(dir).await.unwrap()
+        let recorder = StatsRecorder::new(dir).await;
+        assert!(recorder.is_enabled(), "test stats recorder failed to open");
+        recorder
     }
 
     #[tokio::test]
@@ -274,7 +314,7 @@ mod tests {
             .await
             .unwrap();
 
-        let conn = recorder.db.connect().unwrap();
+        let conn = recorder.db_for_test().connect().unwrap();
         let mut rows = conn
             .query(
                 "SELECT tool, file_path, success, error_msg FROM tool_calls ORDER BY id",
@@ -306,7 +346,7 @@ mod tests {
             .await
             .unwrap();
 
-        let conn = recorder.db.connect().unwrap();
+        let conn = recorder.db_for_test().connect().unwrap();
         let mut rows = conn
             .query(
                 "SELECT language, event, duration_ms, detail FROM server_events",
@@ -327,7 +367,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let recorder = test_recorder(dir.path()).await;
 
-        let conn = recorder.db.connect().unwrap();
+        let conn = recorder.db_for_test().connect().unwrap();
         conn.execute(
             "INSERT INTO tool_calls (timestamp, tool, file_path, duration_ms, success, error_msg) \
              VALUES (datetime('now', '-31 days'), 'old_tool', 'old.rs', 1, 1, NULL)",
@@ -347,7 +387,7 @@ mod tests {
         drop(conn);
         recorder.retention_cleanup().await.unwrap();
 
-        let conn = recorder.db.connect().unwrap();
+        let conn = recorder.db_for_test().connect().unwrap();
         let mut rows = conn
             .query("SELECT tool FROM tool_calls ORDER BY id", ())
             .await
@@ -471,7 +511,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let recorder = test_recorder(dir.path()).await;
 
-        let conn = recorder.db.connect().unwrap();
+        let conn = recorder.db_for_test().connect().unwrap();
         conn.execute(
             "INSERT INTO tool_calls (timestamp, tool, file_path, duration_ms, success, error_msg) \
              VALUES (datetime('now', '-31 days'), 'old_tool', 'old.rs', 1, 1, NULL)",
@@ -504,5 +544,31 @@ mod tests {
 
         let server_usage = reader.query_server_usage().await.unwrap();
         assert!(server_usage.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unopenable_database_yields_disabled_recorder() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join(".symtrace");
+        std::fs::write(&blocker, "not a directory").unwrap();
+
+        let recorder = StatsRecorder::new(dir.path()).await;
+        assert!(!recorder.is_enabled());
+
+        recorder
+            .record_tool_call("goto_definition", Some("src/main.rs"), 1, true, None)
+            .await
+            .unwrap();
+        recorder
+            .record_server_event("rust", "started", Some(1), None)
+            .await
+            .unwrap();
+        recorder.retention_cleanup().await.unwrap();
+
+        assert!(blocker.is_file());
+        assert_eq!(
+            std::fs::read_to_string(&blocker).unwrap(),
+            "not a directory"
+        );
     }
 }
