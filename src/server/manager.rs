@@ -245,6 +245,10 @@ impl LanguageServerManager {
             Language::Rust => crate::language::rust::client_capabilities(),
             Language::TypeScript => crate::language::typescript::client_capabilities(),
         };
+        let initialization_options = match language {
+            Language::Rust => crate::language::rust::initialization_options(),
+            Language::TypeScript => crate::language::typescript::initialization_options(),
+        };
 
         let start = std::time::Instant::now();
         let lang_str = format!("{language:?}");
@@ -254,6 +258,7 @@ impl LanguageServerManager {
             &args_from(cfg),
             &self.root,
             capabilities,
+            initialization_options,
             &self.env,
         )
         .await;

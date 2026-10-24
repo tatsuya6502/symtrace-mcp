@@ -23,6 +23,15 @@ pub fn client_capabilities() -> Value {
     })
 }
 
+/// rust-analyzer initialization options.
+///
+/// Always `None`: rust-analyzer treats `initializationOptions` as its own
+/// configuration, so symtrace-mcp sends none and the field is omitted from
+/// the `initialize` request.
+pub fn initialization_options() -> Option<Value> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -50,5 +59,10 @@ mod tests {
             Value::Bool(true),
             "Rust capabilities should opt in to experimental/serverStatus"
         );
+    }
+
+    #[test]
+    fn no_initialization_options() {
+        assert!(initialization_options().is_none());
     }
 }
