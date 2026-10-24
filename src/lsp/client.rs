@@ -723,7 +723,20 @@ where
         };
 
         match result {
-            Ok(true) => return Ok(()),
+            Ok(true) => {
+                // The server answered, but it may have exited since, or a
+                // status may have arrived meanwhile: apply the same checks
+                // as the five-poll exit.
+                if state.has_changed().is_err() {
+                    return Err(ClientError::Transport(
+                        "language server stopped before reporting its status".into(),
+                    ));
+                }
+                if *state.borrow_and_update() != IndexState::NotReported {
+                    return wait_until_ready(&mut state, deadline).await;
+                }
+                return Ok(());
+            }
             Ok(false) | Err(_) => {
                 fail_count += 1;
                 if fail_count >= MAX_FAIL_POLLS {
@@ -1195,10 +1208,17 @@ mod tests {
         let count = polls.clone();
         let poll = move || {
             let n = count.fetch_add(1, Ordering::SeqCst) + 1;
-            if n == 5 {
-                drop(tx.lock().unwrap().take());
+            // Drop inside the returned future, so the closure happens while
+            // the poll branch is being polled rather than before select!.
+            let sender = if n == 5 {
+                tx.lock().unwrap().take()
+            } else {
+                None
+            };
+            async move {
+                drop(sender);
+                Ok(false)
             }
-            std::future::ready(Ok(false))
         };
 
         let result = wait_for_index_with(rx, true, poll, Duration::from_secs(30)).await;
