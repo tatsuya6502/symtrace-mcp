@@ -195,7 +195,7 @@ mod tests {
 
     async fn test_stats() -> (tempfile::TempDir, Arc<StatsRecorder>) {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = StatsRecorder::new(dir.path()).await.unwrap();
+        let recorder = StatsRecorder::new(dir.path()).await;
         (dir, Arc::new(recorder))
     }
 
