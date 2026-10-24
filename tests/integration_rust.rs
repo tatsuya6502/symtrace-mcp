@@ -16,21 +16,29 @@ fn fixture_lib() -> PathBuf {
     p
 }
 
-async fn spawn_client() -> McpClient {
+/// Spawn the MCP server on the Rust fixture without waiting for readiness.
+async fn spawn_unready_client() -> McpClient {
     common::require_command("rust-analyzer");
 
     let mut cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cwd.push("fixtures/rust-project");
 
-    let mut client = McpClient::spawn(&cwd).await.unwrap();
+    McpClient::spawn(&cwd).await.unwrap()
+}
+
+async fn spawn_client() -> McpClient {
+    let mut client = spawn_unready_client().await;
 
     let lib = fixture_lib();
     let lib_str = lib.to_str().unwrap();
 
     // Wait for rust-analyzer to finish indexing (poll goto_definition on User::new)
-    // Line 52, col 19: `User::new("Alice", 30)` — cursor on `new`
+    // Line 52, col 19: `User::new("Alice", 30)` — cursor on `new`.
+    // The budget exceeds the default `index_timeout_secs` (30 s) because the
+    // first probe blocks inside the server for up to that long, and the
+    // harness does not retry a probe that outlasts its budget.
     client
-        .wait_for_ready(lib_str, 52, 19, Duration::from_secs(30))
+        .wait_for_ready(lib_str, 52, 19, Duration::from_secs(60))
         .await
         .unwrap();
 
@@ -85,6 +93,43 @@ async fn test_tools_list() {
         assert!(tool["name"].is_string());
         assert!(tool["description"].is_string());
         assert!(tool["inputSchema"].is_object());
+    }
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_cold_query_is_results_or_indexing_error() {
+    let mut client = spawn_unready_client().await;
+    let lib = fixture_lib().to_str().unwrap().to_string();
+
+    // First query on a cold server, before any readiness wait: find
+    // implementations of the `Named` trait (line 2, col 13).
+    let result = client
+        .tools_call(
+            "find_implementations",
+            json!({
+                "file_path": lib,
+                "line": 2,
+                "column": 13,
+                "json": true,
+            }),
+        )
+        .await;
+
+    match result {
+        Ok(result) => {
+            let arr = extract_results(&result);
+            assert!(
+                !arr.is_empty(),
+                "cold find_implementations returned an empty result instead of \
+                 results or the indexing error"
+            );
+        }
+        Err(e) => assert!(
+            e.contains("language server is still indexing"),
+            "cold find_implementations failed with an unexpected error: {e}"
+        ),
     }
 
     client.shutdown().await.unwrap();

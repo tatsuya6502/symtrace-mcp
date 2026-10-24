@@ -16,6 +16,9 @@ pub fn client_capabilities() -> Value {
         "workspace": {
             "symbol": { "dynamicRegistration": false },
             "workspaceEdit": { "documentChanges": true }
+        },
+        "experimental": {
+            "serverStatusNotification": true
         }
     })
 }
@@ -36,6 +39,16 @@ mod tests {
         assert!(
             text_doc.get("diagnostic").is_some(),
             "Rust capabilities should still include pull diagnostics"
+        );
+    }
+
+    #[test]
+    fn requests_server_status_notification() {
+        let caps = client_capabilities();
+        assert_eq!(
+            caps["experimental"]["serverStatusNotification"],
+            Value::Bool(true),
+            "Rust capabilities should opt in to experimental/serverStatus"
         );
     }
 }

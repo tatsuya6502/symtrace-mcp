@@ -34,6 +34,16 @@ impl ToolError {
             message: msg.into(),
         }
     }
+
+    /// The language server returned an empty result while it reported that
+    /// it was still indexing; the caller should retry.
+    pub fn indexing() -> Self {
+        Self {
+            code: protocol::INTERNAL_ERROR,
+            message: "language server is still indexing the workspace; retry in a few seconds"
+                .into(),
+        }
+    }
 }
 
 type ToolHandler = Box<

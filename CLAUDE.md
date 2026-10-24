@@ -50,6 +50,7 @@ The server reads `.symtrace.toml` from CWD at startup. If absent, runs in single
 ```toml
 [server.rust]
 command = "rust-analyzer"
+index_timeout_secs = 120  # optional, default 30 (max 86400); 0 skips the index wait
 
 [server.typescript]
 command = "typescript-language-server"
@@ -61,6 +62,8 @@ root = "project-a"
 root = "project-b"
 env = { DATABASE_URL = "postgres://localhost/mydb" }
 ```
+
+With `index_timeout_secs = 0` the first queries may run before the language server has reported its indexing status, so their results can be incomplete (the "still indexing" error relies on that status).
 
 ## OpenSpec
 

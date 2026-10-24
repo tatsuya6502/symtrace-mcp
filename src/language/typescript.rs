@@ -42,4 +42,14 @@ mod tests {
             "TypeScript capabilities should declare call hierarchy"
         );
     }
+
+    #[test]
+    fn no_server_status_notification_capability() {
+        let caps = client_capabilities();
+        assert!(
+            caps.pointer("/experimental/serverStatusNotification")
+                .is_none(),
+            "TypeScript capabilities should not request experimental/serverStatus"
+        );
+    }
 }

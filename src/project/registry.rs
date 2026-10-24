@@ -154,6 +154,7 @@ impl ProjectRegistry {
             {
                 lang_cfg.command = cfg.command.clone();
                 lang_cfg.idle_timeout_secs = cfg.idle_timeout_secs;
+                lang_cfg.index_timeout_secs = cfg.index_timeout_secs;
             }
         }
 
@@ -171,7 +172,8 @@ fn default_server_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec![],
             extensions: vec!["rs"],
             language_id: "rust",
-            idle_timeout_secs: 600,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map.insert(
@@ -182,7 +184,8 @@ fn default_server_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec!["--stdio".to_string()],
             extensions: vec!["ts", "tsx", "js", "jsx"],
             language_id: "typescript",
-            idle_timeout_secs: 600,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map
@@ -266,5 +269,21 @@ mod tests {
 
         let result = registry.get_manager_for_file(&file);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn index_timeout_from_server_section() {
+        let config: SymtraceConfig = toml::from_str(
+            r#"
+[server.rust]
+command = "rust-analyzer"
+index_timeout_secs = 180
+"#,
+        )
+        .unwrap();
+
+        let configs = ProjectRegistry::build_server_configs(&config.server);
+        assert_eq!(configs[&Language::Rust].index_timeout_secs, 180);
+        assert_eq!(configs[&Language::TypeScript].index_timeout_secs, 30);
     }
 }

@@ -167,3 +167,56 @@ pub struct CallHierarchyOutgoingCall {
     pub to: CallHierarchyItem,
     pub from_ranges: Vec<Range>,
 }
+
+// --- 2.6 rust-analyzer extensions ---
+
+/// Parameters of rust-analyzer's `experimental/serverStatus` notification.
+///
+/// `health` is kept as a plain string (`ok`, `warning`, `error`, or any
+/// future value); only `quiescent` decides readiness.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatusParams {
+    pub health: String,
+    pub quiescent: bool,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_status_rust_analyzer_payload() {
+        let params: ServerStatusParams = serde_json::from_value(serde_json::json!({
+            "health": "ok",
+            "quiescent": false,
+            "message": null
+        }))
+        .unwrap();
+        assert_eq!(params.health, "ok");
+        assert!(!params.quiescent);
+        assert!(params.message.is_none());
+    }
+
+    #[test]
+    fn server_status_unknown_health() {
+        let params: ServerStatusParams = serde_json::from_value(serde_json::json!({
+            "health": "degraded",
+            "quiescent": true,
+            "message": "something"
+        }))
+        .unwrap();
+        assert_eq!(params.health, "degraded");
+        assert!(params.quiescent);
+        assert_eq!(params.message.as_deref(), Some("something"));
+    }
+
+    #[test]
+    fn server_status_missing_quiescent() {
+        let result: Result<ServerStatusParams, _> =
+            serde_json::from_value(serde_json::json!({ "health": "ok" }));
+        assert!(result.is_err());
+    }
+}

@@ -30,4 +30,5 @@ integration = ["integration-rust", "integration-typescript"]
 filetime = "0.2"
 mockall = "0.14"
 tempfile = "3.27.0"
+tokio = { version = "1.52.3", features = ["test-util"] }
 which = "7"

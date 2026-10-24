@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 
 use super::idle_monitor::IdleMonitor;
-use crate::lsp::client::{ClientError, LspClient, LspClientApi};
+use crate::lsp::client::{ClientError, IndexState, LspClient, LspClientApi};
 use crate::lsp::file_manager::FileManager;
 use crate::stats::StatsRecorder;
 
@@ -26,6 +26,8 @@ pub struct LanguageServerConfig {
     pub extensions: Vec<&'static str>,
     pub language_id: &'static str,
     pub idle_timeout_secs: u64,
+    /// Upper bound on the index readiness wait at startup; `0` skips the wait.
+    pub index_timeout_secs: u64,
 }
 
 impl LanguageServerConfig {
@@ -58,7 +60,8 @@ fn default_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec![],
             extensions: vec!["rs"],
             language_id: "rust",
-            idle_timeout_secs: 600,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map.insert(
@@ -69,7 +72,8 @@ fn default_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec!["--stdio".to_string()],
             extensions: vec!["ts", "tsx", "js", "jsx"],
             language_id: "typescript",
-            idle_timeout_secs: 600,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map
@@ -110,10 +114,12 @@ impl From<ClientError> for ManagerError {
     }
 }
 
-/// State for a running language server: the client and its file manager.
+/// State for a running language server: the client, its file manager and
+/// its reported indexing state.
 pub(crate) struct ServerEntry {
     pub client: Box<dyn LspClientApi>,
     pub file_manager: FileManager,
+    pub index_state: watch::Receiver<IndexState>,
 }
 
 /// Manages language server lifecycle: lazy startup, lookup, and shutdown.
@@ -235,20 +241,41 @@ impl LanguageServerManager {
         )
         .await;
 
+        // Wait for the server to finish indexing, bounded by the configured
+        // timeout (0 skips the wait). A timeout registers the server anyway;
+        // any other error means the server stopped during the wait (the wait
+        // returns no other error) and fails the startup.
+        let client_result = match client_result {
+            Ok(client) if cfg.index_timeout_secs > 0 => {
+                let timeout = std::time::Duration::from_secs(cfg.index_timeout_secs);
+                match client.wait_for_index(timeout).await {
+                    Ok(()) => Ok(client),
+                    Err(ClientError::IndexTimeout) => {
+                        tracing::warn!(
+                            language = %lang_str,
+                            index_timeout_secs = cfg.index_timeout_secs,
+                            "index wait for {lang_str} ended without readiness \
+                             (timeout {}s); registering the server anyway",
+                            cfg.index_timeout_secs
+                        );
+                        Ok(client)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            other => other,
+        };
+
         match client_result {
             Ok(client) => {
-                // Wait for the server to finish indexing (30s timeout).
-                let timeout = std::time::Duration::from_secs(30);
-                if let Err(e) = client.wait_for_index(timeout).await {
-                    tracing::warn!(error = %e, "index wait warning");
-                }
-
+                let index_state = client.index_state();
                 let duration_ms = start.elapsed().as_millis() as u64;
                 servers.insert(
                     language,
                     ServerEntry {
                         client: Box::new(client),
                         file_manager: FileManager::new(),
+                        index_state,
                     },
                 );
 
@@ -352,6 +379,17 @@ mod tests {
         assert_eq!(ts.extensions, vec!["ts", "tsx", "js", "jsx"]);
         assert_eq!(ts.language_id, "typescript");
         assert_eq!(ts.idle_timeout_secs, 600);
+        assert_eq!(ts.index_timeout_secs, 30);
+    }
+
+    #[test]
+    fn rust_default_config() {
+        let configs = default_configs();
+        let rust = configs
+            .get(&Language::Rust)
+            .expect("Rust config must exist");
+        assert_eq!(rust.command, "rust-analyzer");
+        assert_eq!(rust.index_timeout_secs, 30);
     }
 
     #[tokio::test]
@@ -417,10 +455,18 @@ mod tests {
     }
 
     fn make_entry(mock: MockLspClientApi) -> ServerEntry {
-        ServerEntry {
+        make_entry_with_state(mock).0
+    }
+
+    /// Build an entry together with the `Sender` that drives its index state.
+    fn make_entry_with_state(mock: MockLspClientApi) -> (ServerEntry, watch::Sender<IndexState>) {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let entry = ServerEntry {
             client: Box::new(mock),
             file_manager: FileManager::new(),
-        }
+            index_state: rx,
+        };
+        (entry, tx)
     }
 
     async fn open_file(entry: &mut ServerEntry, path: &Path, language_id: &str) -> String {
@@ -462,6 +508,91 @@ mod tests {
 
         let results = entry.client.references(&uri, test_pos()).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_references_while_indexing_yields_indexing_error() {
+        use crate::mcp::handlers::reject_empty_while_indexing;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_references().returning(|_, _| Ok(Vec::new()));
+
+        let (mut entry, tx) = make_entry_with_state(mock);
+        tx.send(IndexState::Indexing).unwrap();
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let before = *entry.index_state.borrow();
+        let results = entry.client.references(&uri, test_pos()).await.unwrap();
+        let after = *entry.index_state.borrow();
+        let err = reject_empty_while_indexing(before, after, results.is_empty()).unwrap_err();
+        assert_eq!(err.code, crate::mcp::protocol::INTERNAL_ERROR);
+        assert!(err.message.starts_with("language server is still indexing"));
+    }
+
+    #[tokio::test]
+    async fn empty_references_when_ready_yields_normal_result() {
+        use crate::mcp::handlers::reject_empty_while_indexing;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_references().returning(|_, _| Ok(Vec::new()));
+
+        let (mut entry, tx) = make_entry_with_state(mock);
+        tx.send(IndexState::Ready).unwrap();
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let before = *entry.index_state.borrow();
+        let results = entry.client.references(&uri, test_pos()).await.unwrap();
+        let after = *entry.index_state.borrow();
+        assert!(results.is_empty());
+        assert!(reject_empty_while_indexing(before, after, results.is_empty()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn no_hover_while_indexing_yields_indexing_error() {
+        use crate::mcp::handlers::reject_empty_while_indexing;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_hover().returning(|_, _| Ok(None));
+
+        let (mut entry, tx) = make_entry_with_state(mock);
+        tx.send(IndexState::Indexing).unwrap();
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let before = *entry.index_state.borrow();
+        let result = entry.client.hover(&uri, test_pos()).await.unwrap();
+        let after = *entry.index_state.borrow();
+        let err = reject_empty_while_indexing(before, after, result.is_none()).unwrap_err();
+        assert_eq!(err.code, crate::mcp::protocol::INTERNAL_ERROR);
+    }
+
+    #[tokio::test]
+    async fn no_hover_when_ready_yields_normal_result() {
+        use crate::mcp::handlers::reject_empty_while_indexing;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_file(&dir, "test.rs", "fn foo() {}");
+        let mut mock = MockLspClientApi::new();
+        mock.expect_did_open().returning(|_, _, _, _| Ok(()));
+        mock.expect_hover().returning(|_, _| Ok(None));
+
+        let (mut entry, tx) = make_entry_with_state(mock);
+        tx.send(IndexState::Ready).unwrap();
+        let uri = open_file(&mut entry, &path, "rust").await;
+
+        let before = *entry.index_state.borrow();
+        let result = entry.client.hover(&uri, test_pos()).await.unwrap();
+        let after = *entry.index_state.borrow();
+        assert!(result.is_none());
+        assert!(reject_empty_while_indexing(before, after, result.is_none()).is_ok());
     }
 
     #[tokio::test]
