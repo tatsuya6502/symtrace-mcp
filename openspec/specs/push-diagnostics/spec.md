@@ -1,7 +1,7 @@
 # push-diagnostics Specification
 
 ## Purpose
-Caches `textDocument/publishDiagnostics` notifications per file with a TTL so that the `diagnostic` query works for servers without pull diagnostics (such as typescript-language-server), while servers that support pull diagnostics are queried directly.
+Caches `textDocument/publishDiagnostics` notifications per file, expiring entries after 600 seconds of time-to-idle, so that the `diagnostic` query works for servers without pull diagnostics (such as typescript-language-server), while servers that support pull diagnostics are queried directly.
 
 ## Requirements
 
