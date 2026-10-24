@@ -218,10 +218,19 @@ impl LanguageServerManager {
             .get(&language)
             .expect("config must exist for language");
 
-        let capabilities = match language {
-            Language::Rust => crate::language::rust::client_capabilities(),
-            Language::TypeScript => crate::language::typescript::client_capabilities(),
+        let (capabilities, initialization_options) = match language {
+            Language::Rust => (
+                crate::language::rust::client_capabilities(),
+                crate::language::rust::initialization_options(),
+            ),
+            Language::TypeScript => (
+                crate::language::typescript::client_capabilities(),
+                crate::language::typescript::initialization_options(),
+            ),
         };
+        if let Some(opts) = &initialization_options {
+            tracing::debug!(language = ?language, options = %opts, "sending initializationOptions");
+        }
 
         let start = std::time::Instant::now();
         let lang_str = format!("{language:?}");
@@ -231,6 +240,7 @@ impl LanguageServerManager {
             &args_from(cfg),
             &self.root,
             capabilities,
+            initialization_options,
             &self.env,
         )
         .await;

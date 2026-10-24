@@ -24,12 +24,7 @@ fn fixture_caller() -> PathBuf {
 }
 
 async fn spawn_client() -> McpClient {
-    common::require_command("typescript-language-server");
-
-    let mut cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    cwd.push("fixtures/ts-project");
-
-    let mut client = McpClient::spawn(&cwd).await.unwrap();
+    let mut client = spawn_cold_client().await;
 
     let index = fixture_index();
     let index_str = index.to_str().unwrap();
@@ -42,6 +37,22 @@ async fn spawn_client() -> McpClient {
         .unwrap();
 
     client
+}
+
+/// Spawn a client WITHOUT `wait_for_ready`, for first-call tests.
+///
+/// `spawn_client()`'s readiness poll issues its own `goto_definition`, which
+/// opens a file and starts typescript-language-server's project load; later
+/// queries in that session may then fall outside the project-loading window
+/// in which the syntax-only server would answer (Issue #30). A cold client
+/// lets the test's own query be the first `tools/call` of the session.
+async fn spawn_cold_client() -> McpClient {
+    common::require_command("typescript-language-server");
+
+    let mut cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    cwd.push("fixtures/ts-project");
+
+    McpClient::spawn(&cwd).await.unwrap()
 }
 
 fn extract_text(result: &serde_json::Value) -> &str {
@@ -323,6 +334,162 @@ async fn test_rename() {
         !text.contains("Error") && (text.contains("sayHello") || text.contains("rename")),
         "rename should produce changes or confirmation, got: {text}"
     );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_goto_definition_first_call_cross_file() {
+    let mut client = spawn_cold_client().await;
+    let caller = fixture_caller().to_str().unwrap().to_string();
+
+    // First tools/call of the session: goto_definition on the `greetEntity`
+    // call in caller.ts (line 4, col 10), which is defined in index.ts:21.
+    let result = client
+        .tools_call(
+            "goto_definition",
+            json!({
+                "file_path": caller,
+                "line": 4,
+                "column": 10,
+                "json": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let arr = extract_results(&result);
+    assert!(!arr.is_empty(), "expected at least one definition location");
+    let file_path = arr[0]["file_path"].as_str().unwrap();
+    assert!(
+        file_path.ends_with("index.ts"),
+        "first goto_definition should resolve into index.ts, got: {arr:?}"
+    );
+    assert_eq!(
+        arr[0]["line"].as_u64(),
+        Some(21),
+        "first goto_definition should point to greetEntity at index.ts:21, got: {arr:?}"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_find_references_first_call_cross_file() {
+    let mut client = spawn_cold_client().await;
+    let caller = fixture_caller().to_str().unwrap().to_string();
+
+    // First tools/call of the session: find_references on the `greetEntity`
+    // call in caller.ts (line 4, col 10).
+    let result = client
+        .tools_call(
+            "find_references",
+            json!({
+                "file_path": caller,
+                "line": 4,
+                "column": 10,
+                "json": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let arr = extract_results(&result);
+    assert!(
+        arr.len() >= 5,
+        "expected at least 5 references to greetEntity across both files, got {}: {arr:?}",
+        arr.len()
+    );
+    assert!(
+        arr.iter().any(|r| r["file_path"]
+            .as_str()
+            .is_some_and(|f| f.ends_with("index.ts"))),
+        "expected a reference to greetEntity in index.ts, got: {arr:?}"
+    );
+    assert!(
+        arr.iter().any(|r| r["file_path"]
+            .as_str()
+            .is_some_and(|f| f.ends_with("caller.ts"))),
+        "expected a reference to greetEntity in caller.ts, got: {arr:?}"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_hover_first_call_cross_file() {
+    let mut client = spawn_cold_client().await;
+    let caller = fixture_caller().to_str().unwrap().to_string();
+
+    // First tools/call of the session: hover on the `greetEntity` call in
+    // caller.ts (line 4, col 10). A syntax-only answer shows just the import
+    // (`import greetEntity`) instead of the function signature from index.ts.
+    let result = client
+        .tools_call(
+            "hover",
+            json!({
+                "file_path": caller,
+                "line": 4,
+                "column": 10,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let text = extract_text(&result);
+    assert!(
+        text.contains("greetEntity"),
+        "first hover should mention greetEntity, got: {text}"
+    );
+    assert!(
+        text.contains("Greetable") || text.contains("string"),
+        "first hover should show greetEntity's type signature, got: {text}"
+    );
+    assert_ne!(
+        text.trim(),
+        "import greetEntity",
+        "first hover should not be the bare import form"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_rename_first_call_cross_file() {
+    let mut client = spawn_cold_client().await;
+    let index = fixture_index().to_str().unwrap().to_string();
+
+    // First tools/call of the session: rename (preview only, no file
+    // mutation) on `greetEntity` in the `export { greetEntity, User }`
+    // specifier in index.ts (line 30, col 10). Not the call in caller.ts or
+    // the declaration at index.ts:21: from those, tsserver keeps the other
+    // side's name with an alias (`greetEntity as greetEntity2`) and edits a
+    // single file, even on a warm server. From the export specifier, the
+    // edit set reaches caller.ts only if the semantic project has loaded it.
+    let result = client
+        .tools_call(
+            "rename",
+            json!({
+                "file_path": index,
+                "line": 30,
+                "column": 10,
+                "new_name": "greetEntity2",
+                "json": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let data = extract_json(&result);
+    let changes = data["changes"]
+        .as_object()
+        .unwrap_or_else(|| panic!("expected {{changes: {{...}}}} in rename output, got: {data}"));
+    for file in ["caller.ts", "index.ts"] {
+        assert!(
+            changes.keys().any(|path| path.ends_with(file)),
+            "first rename should edit {file}, got: {data}"
+        );
+    }
 
     client.shutdown().await.unwrap();
 }

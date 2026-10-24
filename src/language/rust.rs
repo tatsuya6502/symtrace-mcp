@@ -20,6 +20,15 @@ pub fn client_capabilities() -> Value {
     })
 }
 
+/// rust-analyzer initialization options.
+///
+/// Always `None`: rust-analyzer needs no initialization options, so the
+/// field is omitted from the `initialize` request. `initializationOptions`
+/// is optional in the LSP spec, and omitting it is the canonical form.
+pub fn initialization_options() -> Option<Value> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -37,5 +46,10 @@ mod tests {
             text_doc.get("diagnostic").is_some(),
             "Rust capabilities should still include pull diagnostics"
         );
+    }
+
+    #[test]
+    fn no_initialization_options() {
+        assert!(initialization_options().is_none());
     }
 }
