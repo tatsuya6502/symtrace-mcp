@@ -59,7 +59,7 @@ All tools SHALL return MCP errors (with appropriate error codes) when the tool c
 
 #### Scenario: Language server error
 - **WHEN** the language server returns an error response for a tool's LSP request
-- **THEN** the system SHALL return an MCP error with the LSP error code and message
+- **THEN** the system SHALL return an MCP error with code -32603 (Internal error) whose message includes the LSP error code and message; LSP error codes are not forwarded as MCP error codes because they would be misread as errors about the `tools/call` request itself
 
 #### Scenario: Language server not available
 - **WHEN** the language server crashes or becomes unresponsive during a tool call
