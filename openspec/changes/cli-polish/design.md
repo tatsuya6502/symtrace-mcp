@@ -16,7 +16,6 @@ See proposal.md - Why. Relevant current state:
 - Four `--status` rows that read the same when everything is installed.
 
 **Non-Goals:**
-- Changing the status column width or the `ItemLine` layout.
 - Changing uninstall words (`removed`, `absent`) or the `modified (use --force)` path.
 - Fixing the stale "the `stats` subcommand is the only additional subcommand" sentence in `stats-cli` (separate spec-reconciliation work).
 
@@ -34,8 +33,8 @@ Chosen word for "file existed, our block appended": `updated`.
 - Rule: `created` iff the target file was missing or empty/whitespace-only before the run (matching how `marker_block` and `json_file::load` already treat blank files as absent). For markdown, the `State::Absent` arm already has `text` and `existing`; return `created` when `text.trim().is_empty()`, else `updated` (the frontmatter-prepend sub-arm stays `updated`). For JSON, `json_file::load` returns `{}` for both missing and blank files, so the handler needs one more bit: have `load` also report whether it read non-blank content (e.g. return `(Value, bool)`, or a separate `json_file::is_blank_or_missing(path)` helper that reuses `load`'s rules). `hook_item` returns `created` when the file was blank/missing, else `updated`; `mcp_item` maps `McpChange::Created` the same way. `McpChange::Updated` stays `updated`.
 
 ### D3: Hook and MCP status print `installed v{VERSION}`
-For markdown, `installed v<X>` already means "matches what this binary would install", with X equal to the binary's version. For hook/MCP, `installed` means exactly that too (the entry equals or is equivalent to what this binary writes), so printing `installed v{VERSION}` from the `hook_item` / `mcp_item` Status arms is accurate and a two-line change. `modified` and `absent` stay bare; `outdated` cannot occur for JSON items.
-- Alternative "widen / compute the status column": rejected. Aligns paths but leaves the vocabulary gap the issue complains about, and changes every mode's output.
+For markdown, `installed v<X>` already means "matches what this binary would install", with X equal to the binary's version. For hook/MCP, `installed` means exactly that too (the entry equals or is equivalent to what this binary writes), so printing `installed v{VERSION}` from the `hook_item` / `mcp_item` Status arms is accurate, provided the entry runs this binary. `is_our_hook_command` / `is_our_binary` also accept an absolute path to any file named `symtrace-mcp` (e.g. an older install), so the version is appended only when every command is the bare name or canonicalizes to `std::env::current_exe()` (`preflight::is_running_binary`); otherwise the status is a bare `installed`. `modified` and `absent` stay bare; `outdated` cannot occur for JSON items.
+- Alternative "widen / compute the status column" instead: rejected as a substitute, since it aligns paths but leaves the vocabulary gap. It is done in addition: the column is widened from 9 to 22 (`modified (use --force)`, the longest fixed status), because `installed v<version>` would otherwise misalign mixed reports.
 - Alternative "`installed (no version)`": rejected, noisier and says nothing useful.
 - The existing scenario "Entry registered with claude mcp add ... `--status` reports `installed`" is left as is: it names the status class, which `installed v<version>` still is.
 

@@ -50,12 +50,16 @@ When Explore.md has content that starts with frontmatter, `setup` SHALL only add
 - **THEN** `setup` leaves the frontmatter and existing content unchanged, appends the block, and reports `updated`, not `created`
 
 ### Requirement: Status reports each item
-With `--status`, `setup` SHALL print one line per item with one of `installed`, `modified`, `outdated`, or `absent`, SHALL NOT modify any file, and SHALL exit 0. For the two markdown items an `installed` or `outdated` status SHALL be followed by the begin marker's version (`installed v<version>`, `outdated v<version>`). The hook and MCP items record no version, so when installed they SHALL show the running binary's version (`installed v<version>`).
+With `--status`, `setup` SHALL print one line per item with one of `installed`, `modified`, `outdated`, or `absent`, SHALL NOT modify any file, and SHALL exit 0. For the two markdown items an `installed` or `outdated` status SHALL be followed by the begin marker's version (`installed v<version>`, `outdated v<version>`). The hook and MCP items record no version, so when installed they SHALL show the running binary's version (`installed v<version>`) only when every command the entries run is the bare `symtrace-mcp` or a path that resolves (after canonicalization) to the running binary; otherwise they SHALL show a bare `installed`.
 
 #### Scenario: Partially installed
 - **WHEN** the block is in CLAUDE.md but the hook and MCP entries are missing
 - **THEN** `--status` reports `installed` for the prompt item and `absent` for the hook and MCP items
 
 #### Scenario: Fully installed rows read uniformly
-- **WHEN** all four items are installed by a binary of crate version 0.6.1 and the user runs `symtrace-mcp setup --status` with that binary
+- **WHEN** all four items are installed by a binary of crate version 0.6.1, the hook and MCP entries run the bare command `symtrace-mcp` or a path that resolves to the running binary, and the user runs `symtrace-mcp setup --status` with that binary
 - **THEN** each of the prompt, explore, hook and mcp lines shows the status `installed v0.6.1`
+
+#### Scenario: Entry points at a different binary
+- **WHEN** the MCP entry's command (or a hook command's binary) is an absolute path to a file named `symtrace-mcp` that is not the running binary, and the user runs `symtrace-mcp setup --status`
+- **THEN** that item's line shows a bare `installed`, without a version
