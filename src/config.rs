@@ -23,10 +23,16 @@ pub struct ServerConfig {
     pub command: String,
     #[serde(default = "default_idle_timeout")]
     pub idle_timeout_secs: u64,
+    #[serde(default = "default_index_timeout")]
+    pub index_timeout_secs: u64,
 }
 
 fn default_idle_timeout() -> u64 {
     600
+}
+
+fn default_index_timeout() -> u64 {
+    30
 }
 
 #[derive(Debug, Deserialize)]
@@ -284,5 +290,58 @@ command = "rust-analyzer"
 
         let config = SymtraceConfig::load(&config_path).unwrap();
         assert!(config.logging.level.is_none());
+    }
+
+    #[test]
+    fn load_server_with_index_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[server.rust]
+command = "rust-analyzer"
+index_timeout_secs = 180
+"#,
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert_eq!(config.server["rust"].index_timeout_secs, 180);
+    }
+
+    #[test]
+    fn load_server_index_timeout_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[server.rust]
+command = "rust-analyzer"
+"#,
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        assert_eq!(config.server["rust"].index_timeout_secs, 30);
+    }
+
+    #[test]
+    fn load_server_index_timeout_negative() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[server.rust]
+command = "rust-analyzer"
+index_timeout_secs = -5
+"#,
+        )
+        .unwrap();
+
+        let result = SymtraceConfig::load(&config_path);
+        assert!(matches!(result, Err(ConfigError::Parse(_))));
     }
 }

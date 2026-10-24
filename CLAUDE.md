@@ -50,6 +50,7 @@ The server reads `.symtrace.toml` from CWD at startup. If absent, runs in single
 ```toml
 [server.rust]
 command = "rust-analyzer"
+index_timeout_secs = 120  # optional, default 30; 0 skips the index wait
 
 [server.typescript]
 command = "typescript-language-server"

@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `index_timeout_secs` option in `[server.<lang>]` of `.symtrace.toml` (default 30): how long the first tool call waits for the language server to finish loading the workspace; `0` skips the wait. Raise it for large Rust workspaces.
+
+### Changed
+
+- The startup time that `symtrace-mcp stats` reports for rust-analyzer (`avg startup`) now measures the time until rust-analyzer reports that it has finished loading the workspace (or the index timeout), instead of about 2.5 seconds.
+
 ### Fixed
 
 - `incoming_calls` and `outgoing_calls` now work on TypeScript/JavaScript projects. symtrace-mcp now declares the `textDocument.callHierarchy` client capability, without which typescript-language-server did not advertise call hierarchy (#28).
+- The first queries on a large Rust workspace no longer return empty results before rust-analyzer has finished loading it (#29). The index wait now follows rust-analyzer's `experimental/serverStatus` notification instead of giving up after 5 empty `workspace/symbol` polls, and a query that comes back empty while rust-analyzer is still indexing returns a "language server is still indexing the workspace; retry in a few seconds" error instead of an empty answer.
 
 ## [0.6.0] — 2026-10-23
 

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::tools::ToolError;
+use crate::lsp::client::IndexState;
 use crate::lsp::types::{CallHierarchyItem, Location, Position};
 use crate::lsp::types::{Diagnostic, TextEdit, WorkspaceEdit};
 use crate::project::registry::ProjectRegistry;
@@ -244,11 +245,14 @@ pub async fn hover(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Val
         character: p.column.saturating_sub(1),
     };
 
+    let before = *entry.index_state.borrow();
     let result = entry
         .client
         .hover(&uri, position)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
+    let after = *entry.index_state.borrow();
+    reject_empty_while_indexing(before, after, result.is_none())?;
 
     let text = match result {
         None => "No hover information available".into(),
@@ -324,11 +328,14 @@ pub async fn diagnostics(
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
 
+    let before = *entry.index_state.borrow();
     let diagnostics: Vec<Diagnostic> = entry
         .client
         .diagnostic(&uri)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
+    let after = *entry.index_state.borrow();
+    reject_empty_while_indexing(before, after, diagnostics.is_empty())?;
 
     let text = if diagnostics.is_empty() {
         "No diagnostics found".into()
@@ -442,11 +449,14 @@ pub async fn rename(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Va
         character: p.column.saturating_sub(1),
     };
 
+    let before = *entry.index_state.borrow();
     let result = entry
         .client
         .rename(&uri, position, &new_name)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
+    let after = *entry.index_state.borrow();
+    reject_empty_while_indexing(before, after, result.is_none())?;
 
     let text = match result {
         None => "No rename changes".into(),
@@ -455,6 +465,25 @@ pub async fn rename(registry: &Arc<ProjectRegistry>, params: Value) -> Result<Va
     };
 
     Ok(mcp_tool_result(text))
+}
+
+// ---------------------------------------------------------------------------
+// Indexing check
+// ---------------------------------------------------------------------------
+
+/// Turn an empty result into a retryable "still indexing" error when the
+/// language server reported that it was indexing either before the request
+/// was sent (`before`) or after the response arrived (`after`).
+pub(crate) fn reject_empty_while_indexing(
+    before: IndexState,
+    after: IndexState,
+    empty: bool,
+) -> Result<(), ToolError> {
+    if empty && (before == IndexState::Indexing || after == IndexState::Indexing) {
+        Err(ToolError::indexing())
+    } else {
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -537,12 +566,15 @@ async fn execute_query(
         character: p.column.saturating_sub(1),
     };
 
+    let before = *entry.index_state.borrow();
     let locations = match kind {
         QueryKind::References => entry.client.references(&uri, position).await,
         QueryKind::Definition => entry.client.goto_definition(&uri, position).await,
         QueryKind::Implementations => entry.client.implementations(&uri, position).await,
     }
     .map_err(|e| ToolError::internal(e.to_string()))?;
+    let after = *entry.index_state.borrow();
+    reject_empty_while_indexing(before, after, locations.is_empty())?;
 
     // Format output (5.5 / 5.6).
     let text = if p.json {
@@ -632,11 +664,14 @@ async fn execute_call_hierarchy(
         character: p.column.saturating_sub(1),
     };
 
+    let before = *entry.index_state.borrow();
     let items = entry
         .client
         .prepare_call_hierarchy(&uri, position)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
+    let after = *entry.index_state.borrow();
+    reject_empty_while_indexing(before, after, items.is_empty())?;
 
     if items.is_empty() {
         let text = if p.json {
@@ -656,6 +691,8 @@ async fn execute_call_hierarchy(
                 .incoming_calls(item)
                 .await
                 .map_err(|e| ToolError::internal(e.to_string()))?;
+            let after = *entry.index_state.borrow();
+            reject_empty_while_indexing(before, after, calls.is_empty())?;
             format_call_hierarchy_text(
                 &calls
                     .iter()
@@ -674,6 +711,8 @@ async fn execute_call_hierarchy(
                 .outgoing_calls(item)
                 .await
                 .map_err(|e| ToolError::internal(e.to_string()))?;
+            let after = *entry.index_state.borrow();
+            reject_empty_while_indexing(before, after, calls.is_empty())?;
             format_call_hierarchy_text(
                 &calls
                     .iter()
@@ -1061,6 +1100,41 @@ mod tests {
     fn hover_text_empty_strings_filtered() {
         let contents = json!(["hello", "", { "value": "" }, "world"]);
         assert_eq!(format_hover_text(&contents), "hello\n\nworld");
+    }
+
+    // --- reject_empty_while_indexing ---
+
+    #[test]
+    fn indexing_check_empty_while_indexing_is_error() {
+        use IndexState::*;
+        for (before, after) in [(Indexing, Indexing), (Indexing, Ready), (Ready, Indexing)] {
+            let err = reject_empty_while_indexing(before, after, true).unwrap_err();
+            assert_eq!(err.code, -32603);
+            assert!(
+                err.message.starts_with("language server is still indexing"),
+                "unexpected message: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn indexing_check_non_empty_while_indexing_is_ok() {
+        assert!(
+            reject_empty_while_indexing(IndexState::Indexing, IndexState::Indexing, false).is_ok()
+        );
+    }
+
+    #[test]
+    fn indexing_check_empty_without_indexing_is_ok() {
+        use IndexState::*;
+        for (before, after) in [
+            (NotReported, NotReported),
+            (Ready, Ready),
+            (NotReported, Ready),
+        ] {
+            assert!(reject_empty_while_indexing(before, after, true).is_ok());
+        }
     }
 
     // --- severity_name ---

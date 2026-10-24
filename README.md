@@ -50,6 +50,7 @@ symtrace-mcp can manage multiple independent projects in a single repository, ea
 ```toml
 [server.rust]
 command = "rust-analyzer"
+index_timeout_secs = 120  # optional; raise for large workspaces
 
 [server.typescript]
 command = "typescript-language-server"
@@ -64,8 +65,9 @@ env = { DATABASE_URL = "postgres://localhost/mydb" }
 
 - `[[projects]]` — List of project root directories (relative to the config file). Each gets its own language server.
 - `env` — Optional. Environment variables to set for language servers spawned for this project (augments the parent process environment).
-- `[server.rust]` — Global language server configuration. Optional; defaults to `rust-analyzer` with a 600s idle timeout.
-- `[server.typescript]` — TypeScript language server configuration. Optional; defaults to `typescript-language-server --stdio` with a 600s idle timeout.
+- `[server.rust]` — Global language server configuration. Optional; defaults to `rust-analyzer` with a 600s idle timeout and a 30s index timeout.
+- `[server.typescript]` — TypeScript language server configuration. Optional; defaults to `typescript-language-server --stdio` with a 600s idle timeout and a 30s index timeout.
+- `index_timeout_secs` — Optional, in any `[server.<lang>]` section. How long the first tool call waits for the language server to finish loading the workspace (default 30; `0` skips the wait). On timeout the server is used anyway, and an empty answer while rust-analyzer is still indexing comes back as a "language server is still indexing" error to retry. Raise it for large Rust workspaces that take longer than 30 seconds to load.
 - If `.symtrace.toml` is absent, the server runs in single-project mode using the current directory as the project root.
 
 Tool calls are automatically routed to the correct project's language server based on the file path (longest-prefix match).

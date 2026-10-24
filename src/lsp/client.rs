@@ -5,10 +5,23 @@ use std::time::Duration;
 use async_trait::async_trait;
 use moka::future::Cache;
 use serde_json::Value;
+use tokio::sync::watch;
 
 use super::transport::LspTransport;
-use super::types::{Diagnostic, ServerCapabilities};
+use super::types::{Diagnostic, ServerCapabilities, ServerStatusParams};
 use crate::uri::path_to_uri;
+
+/// Indexing state derived from the server's `experimental/serverStatus`
+/// notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexState {
+    /// The server has never sent a status notification.
+    NotReported,
+    /// The most recent status reported `quiescent: false`.
+    Indexing,
+    /// The most recent status reported `quiescent: true`.
+    Ready,
+}
 
 /// Error type for LSP client operations.
 #[derive(Debug)]
@@ -93,6 +106,7 @@ pub struct LspClient {
     open_files: HashSet<String>,
     capabilities: ServerCapabilities,
     diagnostics_cache: Cache<String, Vec<Diagnostic>>,
+    index_state: watch::Receiver<IndexState>,
 }
 
 #[async_trait]
@@ -469,19 +483,14 @@ impl LspClient {
             .time_to_idle(Duration::from_secs(600))
             .build();
 
+        let (status_tx, index_state) = watch::channel(IndexState::NotReported);
+
         // Spawn background task to process server notifications.
         let cache = diagnostics_cache.clone();
         tokio::spawn(async move {
+            let mut last_health = None;
             while let Some((method, params)) = notification_rx.recv().await {
-                if method == "textDocument/publishDiagnostics"
-                    && let Some(uri) = params.get("uri").and_then(|v| v.as_str())
-                {
-                    let diags = params
-                        .get("diagnostics")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_default();
-                    cache.insert(uri.to_string(), diags).await;
-                }
+                handle_notification(&method, params, &cache, &status_tx, &mut last_health).await;
             }
         });
 
@@ -491,7 +500,14 @@ impl LspClient {
             open_files: HashSet::new(),
             capabilities: init_result.capabilities,
             diagnostics_cache,
+            index_state,
         })
+    }
+
+    /// Return a receiver for the server's indexing state, as reported by
+    /// `experimental/serverStatus` notifications.
+    pub fn index_state(&self) -> watch::Receiver<IndexState> {
+        self.index_state.clone()
     }
 
     /// Return whether a file is currently tracked as open.
@@ -586,59 +602,209 @@ impl LspClient {
         }
     }
 
-    /// Wait for the language server to finish indexing by polling
-    /// `workspace/symbol` with an empty query until a non-empty result arrives.
+    /// Wait for the language server to finish indexing, bounded by `timeout`.
     ///
-    /// Polls every 500ms with the given overall timeout. Each individual
-    /// `workspace/symbol` request has a 5-second timeout to prevent hangs
-    /// when the server is slow to respond during startup.
+    /// If the server reports its status through `experimental/serverStatus`
+    /// (rust-analyzer), the wait ends when it reports `quiescent: true`.
+    /// Otherwise it polls `workspace/symbol` with an empty query every 500ms
+    /// (each request bounded to 5 seconds) until a non-empty result. A status
+    /// that arrives while polling switches to waiting for `quiescent: true`.
     ///
-    /// Returns `Ok(())` immediately if the server does not advertise
-    /// `workspaceSymbolProvider` capability. Also returns `Ok(())` after
-    /// 5 consecutive non-success polls (empty results or errors), as this
-    /// indicates the server is responsive but doesn't support the query or
-    /// hasn't loaded a project yet (e.g., typescript-language-server returns
-    /// JSON-RPC error "No Project" before any file is opened via `didOpen`).
+    /// Returns `Ok(())` immediately if the server has not reported a status
+    /// and does not advertise `workspaceSymbolProvider`. Also returns
+    /// `Ok(())` (logged at info) after 5 consecutive empty or failed polls
+    /// from a server that never reported a status, as this indicates the
+    /// server is responsive but doesn't support the query or hasn't loaded a
+    /// project yet (e.g., typescript-language-server returns JSON-RPC error
+    /// "No Project" before any file is opened via `didOpen`).
     ///
-    /// An unreachable server is handled by the overall `timeout` — each poll
-    /// is also bounded by `per_request_timeout`, so a truly broken server
-    /// won't trigger the early bailout (it will time out instead).
-    pub async fn wait_for_index(&self, timeout: std::time::Duration) -> Result<(), ClientError> {
-        if !provider_enabled(&self.capabilities.workspace_symbol_provider) {
+    /// Returns `Err(ClientError::IndexTimeout)` when the timeout expires
+    /// first. An unreachable server is handled by the overall `timeout` —
+    /// each poll is also bounded by the per-request timeout, so a truly
+    /// broken server won't trigger the early bailout (it will time out
+    /// instead).
+    pub async fn wait_for_index(&self, timeout: Duration) -> Result<(), ClientError> {
+        wait_for_index_with(
+            self.index_state(),
+            provider_enabled(&self.capabilities.workspace_symbol_provider),
+            move || self.workspace_symbol(""),
+            timeout,
+        )
+        .await
+    }
+}
+
+/// Resolve when the watched state changes. If the sender is gone (the
+/// notification task ended), never resolve, so a `select!` does not spin.
+async fn state_changed(state: &mut watch::Receiver<IndexState>) {
+    if state.changed().await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// Wait until the reported state is `Ready` or `deadline` passes.
+async fn wait_until_ready(
+    state: &mut watch::Receiver<IndexState>,
+    deadline: tokio::time::Instant,
+) -> Result<(), ClientError> {
+    let ready = tokio::time::timeout_at(deadline, async {
+        state
+            .wait_for(|s| *s == IndexState::Ready)
+            .await
+            .map(|_| ())
+    })
+    .await;
+    match ready {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(ClientError::Transport(
+            "language server stopped before reporting quiescence".into(),
+        )),
+        Err(_) => Err(ClientError::IndexTimeout),
+    }
+}
+
+/// The index readiness wait behind [`LspClient::wait_for_index`], separated
+/// from the client so it can be tested without a language server.
+///
+/// `poll` sends one `workspace/symbol` request and returns whether the result
+/// was non-empty.
+async fn wait_for_index_with<P, F>(
+    mut state: watch::Receiver<IndexState>,
+    has_workspace_symbol: bool,
+    mut poll: P,
+    timeout: Duration,
+) -> Result<(), ClientError>
+where
+    P: FnMut() -> F,
+    F: std::future::Future<Output = Result<bool, ClientError>>,
+{
+    const POLL_INTERVAL: Duration = Duration::from_millis(500);
+    const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+    const MAX_FAIL_POLLS: u32 = 5;
+
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut fail_count: u32 = 0;
+
+    loop {
+        // `borrow_and_update` marks the value seen, so `changed()` below only
+        // wakes on statuses processed after this check.
+        if *state.borrow_and_update() != IndexState::NotReported {
+            return wait_until_ready(&mut state, deadline).await;
+        }
+        if !has_workspace_symbol {
             return Ok(());
         }
 
-        let start = std::time::Instant::now();
-        let poll_interval = std::time::Duration::from_millis(500);
-        let per_request_timeout = std::time::Duration::from_secs(5);
-        let mut fail_count: u32 = 0;
-        const MAX_FAIL_POLLS: u32 = 5;
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(ClientError::IndexTimeout);
+        }
+        let request_deadline = std::cmp::min(now + PER_REQUEST_TIMEOUT, deadline);
 
-        loop {
-            let elapsed = start.elapsed();
-            if elapsed >= timeout {
-                return Err(ClientError::IndexTimeout);
-            }
-            let remaining = timeout - elapsed;
-            let request_timeout = std::cmp::min(per_request_timeout, remaining);
+        let result = tokio::select! {
+            r = tokio::time::timeout_at(request_deadline, poll()) => r.unwrap_or(Err(
+                ClientError::Transport("workspace/symbol request timed out".into()),
+            )),
+            // A status arrived: abandon the poll and wait for quiescence.
+            () = state_changed(&mut state) => continue,
+        };
 
-            let result = tokio::time::timeout(request_timeout, self.workspace_symbol(""))
-                .await
-                .unwrap_or(Err(ClientError::Transport(
-                    "workspace/symbol request timed out".into(),
-                )));
-
-            match result {
-                Ok(true) => return Ok(()),
-                Ok(false) | Err(_) => {
-                    fail_count += 1;
-                    if fail_count >= MAX_FAIL_POLLS {
-                        return Ok(());
+        match result {
+            Ok(true) => return Ok(()),
+            Ok(false) | Err(_) => {
+                fail_count += 1;
+                if fail_count >= MAX_FAIL_POLLS {
+                    if *state.borrow_and_update() != IndexState::NotReported {
+                        return wait_until_ready(&mut state, deadline).await;
                     }
-                    tokio::time::sleep(poll_interval).await;
+                    tracing::info!(
+                        polls = fail_count,
+                        "index wait ended after {MAX_FAIL_POLLS} empty workspace/symbol polls"
+                    );
+                    return Ok(());
+                }
+                let sleep_until =
+                    std::cmp::min(tokio::time::Instant::now() + POLL_INTERVAL, deadline);
+                tokio::select! {
+                    () = tokio::time::sleep_until(sleep_until) => {}
+                    () = state_changed(&mut state) => {}
                 }
             }
         }
+    }
+}
+
+/// The `(health, message)` pair of the last processed server status, used to
+/// log a degraded health only when it changes.
+type LastHealth = Option<(String, Option<String>)>;
+
+/// Process one server notification.
+///
+/// - `textDocument/publishDiagnostics` fills the push diagnostics cache.
+/// - `experimental/serverStatus` updates the indexing state from `quiescent`
+///   alone. Malformed params are ignored (the previous state is kept). A
+///   `health` other than `ok` is logged as a warning when the
+///   `(health, message)` pair differs from the last processed status.
+async fn handle_notification(
+    method: &str,
+    params: Value,
+    cache: &Cache<String, Vec<Diagnostic>>,
+    status_tx: &watch::Sender<IndexState>,
+    last_health: &mut LastHealth,
+) {
+    match method {
+        "textDocument/publishDiagnostics" => {
+            if let Some(uri) = params.get("uri").and_then(|v| v.as_str()) {
+                let diags = params
+                    .get("diagnostics")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                cache.insert(uri.to_string(), diags).await;
+            }
+        }
+        "experimental/serverStatus" => {
+            let status: ServerStatusParams = match serde_json::from_value(params) {
+                Ok(status) => status,
+                Err(e) => {
+                    tracing::debug!(error = %e, "ignoring malformed experimental/serverStatus");
+                    return;
+                }
+            };
+
+            let new_state = if status.quiescent {
+                IndexState::Ready
+            } else {
+                IndexState::Indexing
+            };
+            let changed = status_tx.send_if_modified(|state| {
+                if *state == new_state {
+                    false
+                } else {
+                    *state = new_state;
+                    true
+                }
+            });
+            if changed {
+                tracing::debug!(
+                    state = ?new_state,
+                    health = %status.health,
+                    message = status.message.as_deref().unwrap_or(""),
+                    "language server status changed"
+                );
+            }
+
+            let pair = (status.health, status.message);
+            if pair.0 != "ok" && last_health.as_ref() != Some(&pair) {
+                tracing::warn!(
+                    health = %pair.0,
+                    message = pair.1.as_deref().unwrap_or(""),
+                    quiescent = status.quiescent,
+                    "language server reports degraded health"
+                );
+            }
+            *last_health = Some(pair);
+        }
+        _ => {}
     }
 }
 
@@ -837,6 +1003,291 @@ mod tests {
 
         let result = cache.get(&uri).await;
         assert!(result.is_none());
+    }
+
+    // --- Server status notification tests ---
+
+    fn new_cache() -> Cache<String, Vec<Diagnostic>> {
+        Cache::builder()
+            .time_to_idle(Duration::from_secs(600))
+            .build()
+    }
+
+    async fn send_status(
+        tx: &watch::Sender<IndexState>,
+        last_health: &mut LastHealth,
+        params: Value,
+    ) {
+        handle_notification(
+            "experimental/serverStatus",
+            params,
+            &new_cache(),
+            tx,
+            last_health,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn status_initial_state_not_reported() {
+        let (_tx, rx) = watch::channel(IndexState::NotReported);
+        assert_eq!(*rx.borrow(), IndexState::NotReported);
+    }
+
+    #[tokio::test]
+    async fn status_transitions() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let mut last = None;
+
+        send_status(
+            &tx,
+            &mut last,
+            serde_json::json!({ "health": "ok", "quiescent": false, "message": null }),
+        )
+        .await;
+        assert_eq!(*rx.borrow(), IndexState::Indexing);
+
+        send_status(
+            &tx,
+            &mut last,
+            serde_json::json!({ "health": "ok", "quiescent": true }),
+        )
+        .await;
+        assert_eq!(*rx.borrow(), IndexState::Ready);
+
+        // A workspace reload sends the server back to indexing.
+        send_status(
+            &tx,
+            &mut last,
+            serde_json::json!({ "health": "ok", "quiescent": false }),
+        )
+        .await;
+        assert_eq!(*rx.borrow(), IndexState::Indexing);
+    }
+
+    #[tokio::test]
+    async fn status_degraded_health_quiescent_is_ready() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let mut last = None;
+
+        send_status(
+            &tx,
+            &mut last,
+            serde_json::json!({
+                "health": "warning",
+                "quiescent": true,
+                "message": "invalid config value"
+            }),
+        )
+        .await;
+        assert_eq!(*rx.borrow(), IndexState::Ready);
+        assert_eq!(
+            last,
+            Some((
+                "warning".to_string(),
+                Some("invalid config value".to_string())
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn status_malformed_keeps_previous_state() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let mut last = None;
+
+        send_status(
+            &tx,
+            &mut last,
+            serde_json::json!({ "health": "ok", "quiescent": false }),
+        )
+        .await;
+        assert_eq!(*rx.borrow(), IndexState::Indexing);
+
+        send_status(&tx, &mut last, serde_json::json!({ "health": "ok" })).await;
+        assert_eq!(*rx.borrow(), IndexState::Indexing);
+
+        send_status(
+            &tx,
+            &mut last,
+            serde_json::json!({ "health": "ok", "quiescent": "yes" }),
+        )
+        .await;
+        assert_eq!(*rx.borrow(), IndexState::Indexing);
+    }
+
+    #[tokio::test]
+    async fn publish_diagnostics_fills_cache() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let cache = new_cache();
+        let mut last = None;
+
+        handle_notification(
+            "textDocument/publishDiagnostics",
+            serde_json::json!({
+                "uri": "file:///test.rs",
+                "diagnostics": [{
+                    "range": {
+                        "start": { "line": 0, "character": 0 },
+                        "end": { "line": 0, "character": 5 }
+                    },
+                    "severity": 1,
+                    "message": "test error"
+                }]
+            }),
+            &cache,
+            &tx,
+            &mut last,
+        )
+        .await;
+
+        let cached = cache.get(&"file:///test.rs".to_string()).await.unwrap();
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].message, "test error");
+        assert_eq!(*rx.borrow(), IndexState::NotReported);
+    }
+
+    // --- Index wait tests ---
+
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A poll closure that counts calls and returns `result` each time.
+    fn counting_poll(
+        count: &Arc<AtomicUsize>,
+        result: bool,
+    ) -> impl FnMut() -> std::future::Ready<Result<bool, ClientError>> {
+        let count = count.clone();
+        move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Ok(result))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_status_ready_before_timeout_does_not_poll() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        tx.send(IndexState::Indexing).unwrap();
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let (result, ()) = tokio::join!(
+            wait_for_index_with(
+                rx,
+                true,
+                counting_poll(&polls, false),
+                Duration::from_secs(30)
+            ),
+            async {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                tx.send(IndexState::Ready).unwrap();
+            }
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_status_never_ready_times_out() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        tx.send(IndexState::Indexing).unwrap();
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let start = tokio::time::Instant::now();
+        let result = wait_for_index_with(
+            rx,
+            true,
+            counting_poll(&polls, false),
+            Duration::from_secs(30),
+        )
+        .await;
+
+        assert!(matches!(result, Err(ClientError::IndexTimeout)));
+        assert_eq!(start.elapsed(), Duration::from_secs(30));
+        // A status-reporting server is never polled, so the 5-poll early
+        // exit cannot end the wait.
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+        drop(tx);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_no_status_five_empty_polls_returns_ok() {
+        let (_tx, rx) = watch::channel(IndexState::NotReported);
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let result = wait_for_index_with(
+            rx,
+            true,
+            counting_poll(&polls, false),
+            Duration::from_secs(30),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(polls.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_status_after_two_polls_waits_for_ready() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let start = tokio::time::Instant::now();
+        let (result, ()) = tokio::join!(
+            wait_for_index_with(
+                rx,
+                true,
+                counting_poll(&polls, false),
+                Duration::from_secs(30)
+            ),
+            async {
+                // Polls run at 0 ms and 500 ms; the status arrives before
+                // the third poll at 1000 ms.
+                tokio::time::sleep(Duration::from_millis(750)).await;
+                tx.send(IndexState::Indexing).unwrap();
+                tokio::time::sleep(Duration::from_secs(20)).await;
+                tx.send(IndexState::Ready).unwrap();
+            }
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
+        assert!(start.elapsed() >= Duration::from_secs(20));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_no_status_no_provider_returns_immediately() {
+        let (_tx, rx) = watch::channel(IndexState::NotReported);
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let start = tokio::time::Instant::now();
+        let result = wait_for_index_with(
+            rx,
+            false,
+            counting_poll(&polls, false),
+            Duration::from_secs(30),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(start.elapsed(), Duration::ZERO);
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_non_empty_poll_returns_ok() {
+        let (_tx, rx) = watch::channel(IndexState::NotReported);
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let result = wait_for_index_with(
+            rx,
+            true,
+            counting_poll(&polls, true),
+            Duration::from_secs(30),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
     }
 
     // --- Capability gating tests (Group 6) ---
