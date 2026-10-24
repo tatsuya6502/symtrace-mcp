@@ -4,18 +4,22 @@
 //! file lock, and the test depends on the timing of two child processes.
 //! Run with `cargo test --test stats_lock -- --ignored`.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_symtrace-mcp");
+const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"stats_lock","version":"0"}}}"#;
 
 fn spawn_server(cwd: &Path, log_dir: &Path) -> Child {
     Command::new(BIN)
         .current_dir(cwd)
         .env("SYMTRACE_LOG_DIR", log_dir)
         .env_remove("SYMTRACE_LOG")
+        // A developer shell may export this for the `stats` CLI; with it set,
+        // process B would ignore A's lock and the test would prove nothing.
+        .env_remove("LIMBO_DISABLE_FILE_LOCK")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -42,20 +46,37 @@ fn second_server_starts_when_stats_db_is_locked() {
     let log_b = cwd.join("logs-b");
 
     // Process A opens the stats database and keeps it locked while its
-    // stdin stays open.
-    let _a = KillOnDrop(spawn_server(cwd, &log_a));
-    let wal = cwd.join(".symtrace").join("stats.db-wal");
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while !wal.exists() {
-        assert!(
-            Instant::now() < deadline,
-            "process A did not create {}",
-            wal.display()
-        );
-        std::thread::sleep(Duration::from_millis(100));
+    // stdin stays open. Its `initialize` response is the readiness signal:
+    // the server answers requests only after `StatsRecorder::new` has
+    // returned, so by then A either holds the lock or has given up on stats.
+    let mut a = KillOnDrop(spawn_server(cwd, &log_a));
+    {
+        let stdin = a.0.stdin.as_mut().unwrap();
+        writeln!(stdin, "{INITIALIZE}").unwrap();
     }
-    // Give A a moment to finish schema setup after creating the WAL file.
-    std::thread::sleep(Duration::from_millis(500));
+    // Read A's stdout on its own thread: the first line is the readiness
+    // signal, and the thread then keeps draining so A's pipe stays open
+    // (and never fills) for as long as A lives.
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let a_stdout = a.0.stdout.take().unwrap();
+    std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(a_stdout);
+        let mut first_line = String::new();
+        let _ = reader.read_line(&mut first_line);
+        let _ = ready_tx.send(first_line);
+        let _ = std::io::copy(&mut reader, &mut std::io::sink());
+    });
+    let first_line = ready_rx
+        .recv_timeout(Duration::from_secs(15))
+        .expect("process A did not answer initialize within 15 s");
+    assert!(
+        first_line.contains("\"serverInfo\""),
+        "unexpected first line from process A: {first_line}"
+    );
+    assert!(
+        cwd.join(".symtrace").join("stats.db").exists(),
+        "process A did not create the stats database"
+    );
 
     // Process B: same directory, so its stats open hits A's lock. Wrapped in
     // KillOnDrop so the timeout path below does not leak it.
@@ -63,7 +84,7 @@ fn second_server_starts_when_stats_db_is_locked() {
     {
         let mut stdin = b.0.stdin.take().unwrap();
         let requests = [
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"stats_lock","version":"0"}}}"#,
+            INITIALIZE,
             r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
         ];
@@ -135,7 +156,9 @@ fn second_server_starts_when_stats_db_is_locked() {
     // B's log has exactly one stats warning, carrying the lock error.
     let logs: String = std::fs::read_dir(&log_b)
         .expect("process B wrote no log directory")
-        .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| std::fs::read_to_string(e.path()).unwrap())
         .collect();
     let warns: Vec<&str> = logs
         .lines()

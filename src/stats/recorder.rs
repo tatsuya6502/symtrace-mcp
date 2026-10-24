@@ -1,5 +1,23 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use turso::Builder;
+
+/// Location of the stats database for a project: `<project_root>/.symtrace/stats.db`.
+fn stats_db_path(project_root: &Path) -> PathBuf {
+    project_root.join(".symtrace").join("stats.db")
+}
+
+/// Build the database handle both the server and the `stats` CLI use, with
+/// multiprocess WAL support so the two processes can share one file.
+async fn build_database(db_path: &Path) -> Result<turso::Database, turso::Error> {
+    Builder::new_local(
+        db_path.to_str().ok_or_else(|| {
+            turso::Error::Error("database path contains invalid UTF-8".to_string())
+        })?,
+    )
+    .experimental_multiprocess_wal(true)
+    .build()
+    .await
+}
 
 /// Records usage statistics to a per-project SQLite database.
 ///
@@ -48,18 +66,12 @@ impl ReadonlyStatsRecorder {
     /// async runtime so this read-only process does not conflict with the
     /// server's WAL locks.
     pub async fn open(project_root: &Path) -> Result<Self, turso::Error> {
-        let db_path = project_root.join(".symtrace").join("stats.db");
+        let db_path = stats_db_path(project_root);
         if !db_path.exists() {
             return Err(turso::Error::Error("stats database not found".into()));
         }
 
-        let db = Builder::new_local(db_path.to_str().ok_or_else(|| {
-            turso::Error::Error("database path contains invalid UTF-8".to_string())
-        })?)
-        .experimental_multiprocess_wal(true)
-        .build()
-        .await?;
-
+        let db = build_database(&db_path).await?;
         Ok(Self { db })
     }
 
@@ -146,7 +158,7 @@ impl StatsRecorder {
     /// Never fails: if the database cannot be opened or initialized, a single
     /// warning is logged and a disabled recorder is returned.
     pub async fn new(project_root: &Path) -> Self {
-        let db_path = project_root.join(".symtrace").join("stats.db");
+        let db_path = stats_db_path(project_root);
         match Self::open(&db_path).await {
             Ok(db) => Self { db: Some(db) },
             Err(e) => {
@@ -166,13 +178,7 @@ impl StatsRecorder {
                 turso::Error::Error(format!("failed to create stats directory: {e}"))
             })?;
         }
-        let db = Builder::new_local(db_path.to_str().ok_or_else(|| {
-            turso::Error::Error("database path contains invalid UTF-8".to_string())
-        })?)
-        .experimental_multiprocess_wal(true)
-        .build()
-        .await?;
-
+        let db = build_database(db_path).await?;
         Self::ensure_schema(&db).await?;
         Ok(db)
     }
