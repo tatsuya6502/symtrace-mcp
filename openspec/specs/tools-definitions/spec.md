@@ -165,7 +165,7 @@ The system SHALL register an MCP tool named `diagnostics` that accepts `file_pat
 
 #### Scenario: Pull diagnostics not supported
 - **WHEN** the language server does not support pull diagnostics (`diagnostic_provider` is `None`)
-- **THEN** the system SHALL return an MCP error with code `-32603` indicating pull diagnostics is not supported
+- **THEN** the system SHALL return the cached push diagnostics for the file, or "No diagnostics found" when nothing is cached
 
 ### Requirement: rename tool
 The system SHALL register an MCP tool named `rename` that accepts `file_path` (string, required), `line` (integer, required, 1-based), `column` (integer, required, 1-based), `new_name` (string, required), and `json` (boolean, optional, default false). It SHALL dispatch to `textDocument/rename` via the language server and return a preview of changes WITHOUT applying them.

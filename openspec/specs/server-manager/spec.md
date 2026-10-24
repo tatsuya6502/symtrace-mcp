@@ -32,8 +32,8 @@ The system SHALL provide a `LanguageServerManager` that maps file paths to langu
 - **THEN** the system SHALL return an error indicating the language is not supported
 
 #### Scenario: File outside project root
-- **WHEN** `get_client_for_file` is called with a file path that is not under this manager's project root
-- **THEN** the system SHALL return an error indicating the file is outside the project scope
+- **WHEN** a tool request names a file path that is not under any configured project root
+- **THEN** the request SHALL be rejected by `ProjectRegistry` before any manager is selected (see project-registry "File not under any project"); `get_client_for_file` itself only resolves the language from the file extension and is reached only through the registry
 
 ### Requirement: Idle monitor automatic shutdown
 The system SHALL monitor language server usage and automatically shut down servers that have been idle for longer than the configured timeout (`idle_timeout_secs`, default 600 seconds for every language server).

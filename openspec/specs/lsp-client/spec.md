@@ -123,10 +123,10 @@ The system SHALL provide a `hover` method on `LspClient` that sends `textDocumen
 - **THEN** the system SHALL return a `ClientError::Protocol` indicating hover is not supported
 
 ### Requirement: Pull diagnostics query method
-The system SHALL provide a `diagnostic` method on `LspClient` that sends `textDocument/diagnostic` with a URI, and returns a list of `Diagnostic` results.
+The system SHALL provide a `diagnostic` method on `LspClient` that sends `textDocument/diagnostic` with a URI when the server supports pull diagnostics, and otherwise returns the cached push diagnostics for that URI (see the push-diagnostics capability), as a list of `Diagnostic` results.
 
 #### Scenario: Diagnostics returns errors and warnings
-- **WHEN** `diagnostic` is called with a valid URI
+- **WHEN** `diagnostic` is called with a valid URI and the server supports pull diagnostics
 - **THEN** the system SHALL send `textDocument/diagnostic` and return a list of `Diagnostic` entries
 
 #### Scenario: No diagnostics
@@ -135,7 +135,7 @@ The system SHALL provide a `diagnostic` method on `LspClient` that sends `textDo
 
 #### Scenario: Diagnostics capability check
 - **WHEN** `diagnostic_provider` is `None` in server capabilities
-- **THEN** the system SHALL return a `ClientError::Protocol` indicating pull diagnostics is not supported
+- **THEN** the system SHALL return the cached push diagnostics for the URI, or an empty list when nothing is cached, instead of an error
 
 ### Requirement: Rename query method
 The system SHALL provide a `rename` method on `LspClient` that sends `textDocument/rename` with a URI, position, and new name, and returns an `Option<WorkspaceEdit>` result.
