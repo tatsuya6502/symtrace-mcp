@@ -727,6 +727,14 @@ where
             Ok(false) | Err(_) => {
                 fail_count += 1;
                 if fail_count >= MAX_FAIL_POLLS {
+                    // The sender may have closed while this poll was in
+                    // flight (both select! branches ready, poll won): a
+                    // stopped server must not be registered as ready.
+                    if state.has_changed().is_err() {
+                        return Err(ClientError::Transport(
+                            "language server stopped before reporting its status".into(),
+                        ));
+                    }
                     if *state.borrow_and_update() != IndexState::NotReported {
                         return wait_until_ready(&mut state, deadline).await;
                     }
@@ -1174,6 +1182,32 @@ mod tests {
             count.fetch_add(1, Ordering::SeqCst);
             std::future::ready(Ok(result))
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_server_stopped_during_fifth_poll_fails() {
+        // The sender closes while the fifth empty poll is in flight, so the
+        // poll branch of the select! can win; the five-poll exit must still
+        // notice the closure instead of returning Ok.
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        let tx = std::sync::Mutex::new(Some(tx));
+        let polls = Arc::new(AtomicUsize::new(0));
+        let count = polls.clone();
+        let poll = move || {
+            let n = count.fetch_add(1, Ordering::SeqCst) + 1;
+            if n == 5 {
+                drop(tx.lock().unwrap().take());
+            }
+            std::future::ready(Ok(false))
+        };
+
+        let result = wait_for_index_with(rx, true, poll, Duration::from_secs(30)).await;
+
+        assert!(
+            matches!(result, Err(ClientError::Transport(_))),
+            "{result:?}"
+        );
+        assert_eq!(polls.load(Ordering::SeqCst), 5);
     }
 
     #[tokio::test(start_paused = true)]
