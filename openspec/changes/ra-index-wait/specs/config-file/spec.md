@@ -48,7 +48,7 @@ The system SHALL read configuration from a `.symtrace.toml` file located in the 
 - **THEN** the system SHALL parse `index_timeout_secs` as 180 for the Rust server config
 
 #### Scenario: Invalid index timeout value
-- **WHEN** `index_timeout_secs` is negative or not an integer
+- **WHEN** `index_timeout_secs` is negative, not an integer, or greater than 86400 (one day)
 - **THEN** the system SHALL return a descriptive error and refuse to start
 
 ### Requirement: Server configuration with global defaults

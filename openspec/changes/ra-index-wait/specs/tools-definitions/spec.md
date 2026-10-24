@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Empty result while the language server is indexing
-When a position query (`find_references`, `goto_definition`, `find_implementations`, `hover`, `incoming_calls`, `outgoing_calls`, `rename`, `diagnostics`) produces an empty result and the language server was indexing when the query was sent or when the result arrived, the tool SHALL return an MCP error with code `-32603` and a message starting with `language server is still indexing`, instead of its "no results" output.
+When a position query (`find_references`, `goto_definition`, `find_implementations`, `hover`, `incoming_calls`, `outgoing_calls`, `rename`) produces an empty result and the language server was indexing when the query was sent or when the result arrived, the tool SHALL return an MCP error with code `-32603` and a message starting with `language server is still indexing`, instead of its "no results" output.
 
 #### Scenario: Empty location list while indexing
 - **WHEN** `find_references`, `goto_definition` or `find_implementations` gets an empty location list while the language server is indexing
@@ -23,9 +23,9 @@ When a position query (`find_references`, `goto_definition`, `find_implementatio
 - **WHEN** `rename` gets no workspace edit while the language server is indexing
 - **THEN** the system SHALL return the indexing error instead of "No rename changes"
 
-#### Scenario: No diagnostics while indexing
+#### Scenario: Empty diagnostics while indexing
 - **WHEN** `diagnostics` gets an empty list while the language server is indexing
-- **THEN** the system SHALL return the indexing error instead of "No diagnostics found"
+- **THEN** the system SHALL return its normal "No diagnostics found" output, because an empty report is a valid answer
 
 #### Scenario: Server becomes indexing during the query
 - **WHEN** the language server was ready when the query was sent but reports that it is indexing before the empty result arrives

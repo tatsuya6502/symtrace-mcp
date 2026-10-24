@@ -85,7 +85,8 @@ returns `Err(ToolError::indexing())` when `empty` is true and either sample is `
 
 - `execute_query` (references, definition, implementations): `locations.is_empty()`.
 - `execute_call_hierarchy`: after `prepare_call_hierarchy` (`items.is_empty()`, before the "No callable symbol" early return) and after `incoming_calls` / `outgoing_calls` (`calls.is_empty()`). The "before" sample is the one taken before `prepare_call_hierarchy`.
-- `hover`: `result.is_none()`. `rename`: `result.is_none()`. `diagnostics`: `diagnostics.is_empty()`.
+- `hover`: `result.is_none()`. `rename`: `result.is_none()`.
+- `diagnostics` is excluded: an empty list is the normal answer for a clean file, and during a workspace reload (D5) the check turned that answer into an error loop.
 
 Sampling both ends covers a server that leaves quiescence mid-query (spec scenario "Server becomes indexing during the query") and one that reaches quiescence just after sending an answer computed on the half-loaded crate graph.
 

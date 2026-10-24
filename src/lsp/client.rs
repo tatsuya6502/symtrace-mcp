@@ -663,6 +663,14 @@ async fn wait_until_ready(
     }
 }
 
+/// `now + timeout`, or a deadline about 30 years away when that overflows
+/// `Instant` (the same horizon tokio uses for "never").
+fn deadline_after(timeout: Duration) -> tokio::time::Instant {
+    const FAR_FUTURE: Duration = Duration::from_secs(86_400 * 365 * 30);
+    let now = tokio::time::Instant::now();
+    now.checked_add(timeout).unwrap_or_else(|| now + FAR_FUTURE)
+}
+
 /// The index readiness wait behind [`LspClient::wait_for_index`], separated
 /// from the client so it can be tested without a language server.
 ///
@@ -682,7 +690,7 @@ where
     const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
     const MAX_FAIL_POLLS: u32 = 5;
 
-    let deadline = tokio::time::Instant::now() + timeout;
+    let deadline = deadline_after(timeout);
     let mut fail_count: u32 = 0;
 
     loop {
@@ -1184,6 +1192,48 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(polls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_huge_timeout_does_not_overflow() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        tx.send(IndexState::Indexing).unwrap();
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let (result, ()) = tokio::join!(
+            wait_for_index_with(rx, true, counting_poll(&polls, false), Duration::MAX),
+            async {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                tx.send(IndexState::Ready).unwrap();
+            }
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_server_stopped_is_not_a_timeout() {
+        let (tx, rx) = watch::channel(IndexState::NotReported);
+        tx.send(IndexState::Indexing).unwrap();
+        let polls = Arc::new(AtomicUsize::new(0));
+
+        let start = tokio::time::Instant::now();
+        let (result, ()) = tokio::join!(
+            wait_for_index_with(
+                rx,
+                true,
+                counting_poll(&polls, false),
+                Duration::from_secs(30)
+            ),
+            async move {
+                // The notification task ends (server died): the sender drops.
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                drop(tx);
+            }
+        );
+
+        assert!(matches!(result, Err(ClientError::Transport(_))));
+        assert_eq!(start.elapsed(), Duration::from_secs(5));
     }
 
     #[tokio::test(start_paused = true)]

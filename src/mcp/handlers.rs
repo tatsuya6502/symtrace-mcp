@@ -328,14 +328,13 @@ pub async fn diagnostics(
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
 
-    let before = *entry.index_state.borrow();
+    // No indexing check here: an empty list is the normal answer for a clean
+    // file, so it must not become a "still indexing" error (design D4).
     let diagnostics: Vec<Diagnostic> = entry
         .client
         .diagnostic(&uri)
         .await
         .map_err(|e| ToolError::internal(e.to_string()))?;
-    let after = *entry.index_state.borrow();
-    reject_empty_while_indexing(before, after, diagnostics.is_empty())?;
 
     let text = if diagnostics.is_empty() {
         "No diagnostics found".into()

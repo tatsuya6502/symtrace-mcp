@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `index_timeout_secs` option in `[server.<lang>]` of `.symtrace.toml` (default 30): how long the first tool call waits for the language server to finish loading the workspace; `0` skips the wait. Raise it for large Rust workspaces.
+- `index_timeout_secs` option in `[server.<lang>]` of `.symtrace.toml` (default 30, at most 86400): how long the first tool call waits for the language server to finish loading the workspace; `0` skips the wait. Raise it for large Rust workspaces.
 
 ### Changed
 

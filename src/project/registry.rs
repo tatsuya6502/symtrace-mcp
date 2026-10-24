@@ -172,8 +172,8 @@ fn default_server_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec![],
             extensions: vec!["rs"],
             language_id: "rust",
-            idle_timeout_secs: 600,
-            index_timeout_secs: 30,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map.insert(
@@ -184,8 +184,8 @@ fn default_server_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec!["--stdio".to_string()],
             extensions: vec!["ts", "tsx", "js", "jsx"],
             language_id: "typescript",
-            idle_timeout_secs: 600,
-            index_timeout_secs: 30,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map

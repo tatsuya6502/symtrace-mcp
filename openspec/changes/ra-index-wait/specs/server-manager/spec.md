@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Configurable index wait timeout
-When starting a language server, the system SHALL bound the index readiness wait by that language's configured `index_timeout_secs` (default 30 seconds). A value of `0` SHALL skip the wait. After a timeout or a skipped wait the system SHALL register the server and serve tool calls.
+When starting a language server, the system SHALL bound the index readiness wait by that language's configured `index_timeout_secs` (default 30 seconds). A value of `0` SHALL skip the wait. After a timeout or a skipped wait the system SHALL register the server and serve tool calls. If the server stops during the wait, the startup SHALL fail.
 
 #### Scenario: Default index timeout
 - **WHEN** a language server is started and its configuration does not set `index_timeout_secs`
@@ -14,6 +14,10 @@ When starting a language server, the system SHALL bound the index readiness wait
 #### Scenario: Index wait times out
 - **WHEN** the server does not become ready within its index timeout
 - **THEN** the system SHALL log a warning that names the language and the timeout, register the server, and execute the pending tool call
+
+#### Scenario: Server stops during the index wait
+- **WHEN** the language server stops (its notification stream ends) before it becomes ready and before the index timeout expires
+- **THEN** the system SHALL record a `startup_failed` event and return a startup error instead of registering the server
 
 #### Scenario: Index wait disabled
 - **WHEN** a language server is started with `index_timeout_secs = 0`

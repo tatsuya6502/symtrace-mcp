@@ -60,8 +60,8 @@ fn default_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec![],
             extensions: vec!["rs"],
             language_id: "rust",
-            idle_timeout_secs: 600,
-            index_timeout_secs: 30,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map.insert(
@@ -72,8 +72,8 @@ fn default_configs() -> HashMap<Language, LanguageServerConfig> {
             args: vec!["--stdio".to_string()],
             extensions: vec!["ts", "tsx", "js", "jsx"],
             language_id: "typescript",
-            idle_timeout_secs: 600,
-            index_timeout_secs: 30,
+            idle_timeout_secs: crate::config::DEFAULT_IDLE_TIMEOUT_SECS,
+            index_timeout_secs: crate::config::DEFAULT_INDEX_TIMEOUT_SECS,
         },
     );
     map
@@ -241,24 +241,33 @@ impl LanguageServerManager {
         )
         .await;
 
-        match client_result {
-            Ok(client) => {
-                // Wait for the server to finish indexing, bounded by the
-                // configured timeout (0 skips the wait).
-                if cfg.index_timeout_secs > 0 {
-                    let timeout = std::time::Duration::from_secs(cfg.index_timeout_secs);
-                    if let Err(e) = client.wait_for_index(timeout).await {
+        // Wait for the server to finish indexing, bounded by the configured
+        // timeout (0 skips the wait). A timeout registers the server anyway;
+        // any other error means the server stopped during the wait (the wait
+        // returns no other error) and fails the startup.
+        let client_result = match client_result {
+            Ok(client) if cfg.index_timeout_secs > 0 => {
+                let timeout = std::time::Duration::from_secs(cfg.index_timeout_secs);
+                match client.wait_for_index(timeout).await {
+                    Ok(()) => Ok(client),
+                    Err(ClientError::IndexTimeout) => {
                         tracing::warn!(
                             language = %lang_str,
                             index_timeout_secs = cfg.index_timeout_secs,
-                            error = %e,
                             "index wait for {lang_str} ended without readiness \
                              (timeout {}s); registering the server anyway",
                             cfg.index_timeout_secs
                         );
+                        Ok(client)
                     }
+                    Err(e) => Err(e),
                 }
+            }
+            other => other,
+        };
 
+        match client_result {
+            Ok(client) => {
                 let index_state = client.index_state();
                 let duration_ms = start.elapsed().as_millis() as u64;
                 servers.insert(
