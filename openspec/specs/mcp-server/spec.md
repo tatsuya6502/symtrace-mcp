@@ -42,7 +42,7 @@ The server SHALL handle `tools/call` requests by looking up the tool name and di
 
 #### Scenario: Call an unknown tool
 - **WHEN** a `tools/call` request arrives with an unrecognized tool name
-- **THEN** the server returns a JSON-RPC error with code -32601 (Method not found)
+- **THEN** the server returns a JSON-RPC error with code -32602 (Invalid params) and the message `unknown tool: <name>`
 
 ### Requirement: MCP server returns JSON-RPC errors for malformed requests
 The server SHALL return standard JSON-RPC error codes for invalid messages: -32700 (Parse error), -32600 (Invalid Request), -32601 (Method not found).

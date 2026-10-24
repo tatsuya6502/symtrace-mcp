@@ -36,7 +36,7 @@ The system SHALL provide a `LanguageServerManager` that maps file paths to langu
 - **THEN** the system SHALL return an error indicating the file is outside the project scope
 
 ### Requirement: Idle monitor automatic shutdown
-The system SHALL monitor language server usage and automatically shut down servers that have been idle for longer than the configured timeout (default 300 seconds for rust-analyzer: 600 seconds).
+The system SHALL monitor language server usage and automatically shut down servers that have been idle for longer than the configured timeout (`idle_timeout_secs`, default 600 seconds for every language server).
 
 #### Scenario: Idle server is shut down
 - **WHEN** a language server has had no tool invocations for longer than its idle timeout

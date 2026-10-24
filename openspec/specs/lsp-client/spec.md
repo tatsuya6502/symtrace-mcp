@@ -25,15 +25,19 @@ The system SHALL provide an `LspClient` that manages the full LSP server lifecyc
 - **THEN** it SHALL implement all `LspClientApi` trait methods, delegating to its internal `LspTransport`
 
 ### Requirement: Index readiness wait
-After initialization, the system SHALL wait for the language server to finish indexing before responding to queries. It SHALL poll `textDocument/documentSymbol` until a non-empty result is returned, with a configurable timeout.
+After initialization, the system SHALL wait for the language server to finish indexing before accepting queries. It SHALL poll `workspace/symbol` with an empty query every 500 ms (each request bounded to 5 seconds) until a non-empty result is returned, with an overall timeout of 30 seconds. If the server does not advertise `workspaceSymbolProvider`, the wait SHALL be skipped.
 
 #### Scenario: Server becomes ready within timeout
-- **WHEN** the language server returns a non-empty `documentSymbol` result within the timeout period
+- **WHEN** the language server returns a non-empty `workspace/symbol` result within the timeout period
 - **THEN** the system SHALL proceed to accept queries
 
 #### Scenario: Server fails to become ready
-- **WHEN** the language server does not return a non-empty `documentSymbol` result within the timeout period
-- **THEN** the system SHALL return an error indicating the server failed to initialize in time
+- **WHEN** the language server does not return a non-empty `workspace/symbol` result within the timeout period
+- **THEN** the system SHALL log a warning and register the server anyway so that queries can proceed
+
+#### Scenario: Server has no workspace symbol support
+- **WHEN** the server capabilities do not include `workspaceSymbolProvider`
+- **THEN** the system SHALL skip the readiness wait and accept queries immediately
 
 ### Requirement: File management via didOpen/didChange/didClose
 The system SHALL send `textDocument/didOpen` before querying a file, `textDocument/didChange` when the file has been modified since last open (detected by mtime), and `textDocument/didClose` when the file is no longer needed. These methods SHALL be part of the `LspClientApi` trait so that `FileManager` can accept any implementation (including mocks).
