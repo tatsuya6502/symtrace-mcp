@@ -1,4 +1,9 @@
-## MODIFIED Requirements
+# lsp-transport Specification
+
+## Purpose
+Implements JSON-RPC 2.0 over stdio with `Content-Length` framing to a language server child process, resolving responses to pending requests and forwarding server notifications over a channel.
+
+## Requirements
 
 ### Requirement: LSP transport reads JSON-RPC responses with Content-Length framing
 The transport SHALL read incoming messages by parsing the `Content-Length` header, then reading exactly that many bytes as the JSON body. For messages with an `id` field (responses), the transport SHALL resolve the pending request. For messages with a `method` field and no `id` (notifications), the transport SHALL forward them via an mpsc channel. For messages with both `id` and `method` (server-initiated requests), the transport SHALL respond with `-32601` (unsupported). The transport SHALL accept optional environment variables to augment the child process environment.

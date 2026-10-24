@@ -1,4 +1,9 @@
-## ADDED Requirements
+# lsp-client-api Specification
+
+## Purpose
+Defines the `LspClientApi` trait that abstracts the LSP client's file-lifecycle and query methods behind a dyn-compatible interface, so handlers and `FileManager` can be unit-tested against a mock without spawning a language server.
+
+## Requirements
 
 ### Requirement: LspClientApi trait definition
 The system SHALL define an `LspClientApi` trait with `Send + Sync` bounds that declares the following async methods:

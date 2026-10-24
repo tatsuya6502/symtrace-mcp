@@ -1,4 +1,9 @@
-## ADDED Requirements
+# project-registry Specification
+
+## Purpose
+Maps each file path to the `LanguageServerManager` of its project via longest-prefix match on configured roots, so one server process can serve multiple independent projects, each with its own language servers and environment variables.
+
+## Requirements
 
 ### Requirement: ProjectRegistry routes files to project managers
 The system SHALL provide a `ProjectRegistry` that maps file paths to the appropriate `LanguageServerManager` using longest-prefix-match on configured project roots.

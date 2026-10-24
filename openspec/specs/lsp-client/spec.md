@@ -1,4 +1,9 @@
-## MODIFIED Requirements
+# lsp-client Specification
+
+## Purpose
+Provides `LspClient`, the production implementation of `LspClientApi`, which drives a language server through its LSP lifecycle (spawn, initialize, queries, shutdown) and keeps the server's view of files current via didOpen/didChange/didClose.
+
+## Requirements
 
 ### Requirement: LspClient lifecycle management
 The system SHALL provide an `LspClient` that manages the full LSP server lifecycle: spawn the child process, send `initialize` with client capabilities, receive server capabilities, send `initialized` notification, and handle `shutdown` + `exit` for clean termination. `LspClient` SHALL implement the `LspClientApi` trait.

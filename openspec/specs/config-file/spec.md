@@ -1,3 +1,8 @@
+# config-file Specification
+
+## Purpose
+Loads `.symtrace.toml` from the working directory at startup to define projects (with optional per-project environment variables), per-language server commands, and the logging level, falling back to an implicit single-project configuration when the file is absent.
+
 ## Requirements
 
 ### Requirement: Configuration loaded from .symtrace.toml

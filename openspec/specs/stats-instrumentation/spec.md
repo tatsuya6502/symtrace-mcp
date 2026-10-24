@@ -1,3 +1,8 @@
+# stats-instrumentation Specification
+
+## Purpose
+Records every tool call and language server start/stop event in the stats database as a side effect of normal operation, with recording failures logged via structured logging rather than surfaced to the caller.
+
 ## Requirements
 
 ### Requirement: Tool call instrumentation
