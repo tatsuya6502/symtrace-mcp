@@ -1,13 +1,13 @@
 ## MODIFIED Requirements
 
-### Requirement: Open/write/close pattern
+### Requirement: Shared database handle with multiprocess WAL
 The system SHALL store the database path at construction and defer opening the Turso database until the first operation requires it. When opened, the `Database` SHALL be built with `experimental_multiprocess_wal(true)`. The database SHALL be closed 15 seconds after the last write operation using a debounce pattern (each write cancels and reschedules the close timer). The system SHALL use `Arc<Mutex<Option<Database>>>` for thread-safe lazy access. A new `Connection` via `db.connect()` SHALL be created for each operation.
 
 #### Scenario: First tool call opens database lazily
 - **WHEN** a tool call occurs and the database has not been opened yet
 - **THEN** the system opens the database with `experimental_multiprocess_wal(true)`, ensures the schema, and writes the tool call record
 
-#### Scenario: Tool call records stats with open database
+#### Scenario: Tool call records stats
 - **WHEN** a tool call completes, the database is open, and stats are recorded
 - **THEN** the system creates a `Connection` from the `Database`, inserts a row, and drops the `Connection`
 
