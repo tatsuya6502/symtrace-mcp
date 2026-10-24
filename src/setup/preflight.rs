@@ -47,6 +47,14 @@ pub fn warning_for(on_path: Option<&Path>, current_exe: Option<&Path>) -> Option
     }
 }
 
+/// Does an entry's `command` run this binary? True for the bare name (what
+/// `setup` writes; `warning` covers where `PATH` resolves it) and for a path
+/// that canonicalizes to the running executable.
+pub fn is_running_binary(command: &str) -> bool {
+    command == BINARY
+        || std::env::current_exe().is_ok_and(|exe| canonical(&exe) == canonical(Path::new(command)))
+}
+
 fn canonical(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
