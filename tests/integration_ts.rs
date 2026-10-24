@@ -44,6 +44,22 @@ async fn spawn_client() -> McpClient {
     client
 }
 
+/// Spawn a client WITHOUT `wait_for_ready`, for first-call tests.
+///
+/// `spawn_client()`'s readiness poll issues its own `goto_definition`, which
+/// opens a file and starts typescript-language-server's project load; later
+/// queries in that session may then fall outside the project-loading window
+/// in which the syntax-only server would answer (Issue #30). A cold client
+/// lets the test's own query be the first `tools/call` of the session.
+async fn spawn_cold_client() -> McpClient {
+    common::require_command("typescript-language-server");
+
+    let mut cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    cwd.push("fixtures/ts-project");
+
+    McpClient::spawn(&cwd).await.unwrap()
+}
+
 fn extract_text(result: &serde_json::Value) -> &str {
     result["content"][0]["text"].as_str().unwrap()
 }
@@ -322,6 +338,78 @@ async fn test_rename() {
     assert!(
         !text.contains("Error") && (text.contains("sayHello") || text.contains("rename")),
         "rename should produce changes or confirmation, got: {text}"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_goto_definition_first_call_cross_file() {
+    let mut client = spawn_cold_client().await;
+    let caller = fixture_caller().to_str().unwrap().to_string();
+
+    // First tools/call of the session: goto_definition on the `greetEntity`
+    // call in caller.ts (line 4, col 10), which is defined in index.ts:21.
+    let result = client
+        .tools_call(
+            "goto_definition",
+            json!({
+                "file_path": caller,
+                "line": 4,
+                "column": 10,
+                "json": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let arr = extract_results(&result);
+    assert!(!arr.is_empty(), "expected at least one definition location");
+    let file_path = arr[0]["file_path"].as_str().unwrap();
+    assert!(
+        file_path.ends_with("index.ts"),
+        "first goto_definition should resolve into index.ts, got: {arr:?}"
+    );
+    assert_eq!(
+        arr[0]["line"].as_u64(),
+        Some(21),
+        "first goto_definition should point to greetEntity at index.ts:21, got: {arr:?}"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_find_references_first_call_cross_file() {
+    let mut client = spawn_cold_client().await;
+    let caller = fixture_caller().to_str().unwrap().to_string();
+
+    // First tools/call of the session: find_references on the `greetEntity`
+    // call in caller.ts (line 4, col 10).
+    let result = client
+        .tools_call(
+            "find_references",
+            json!({
+                "file_path": caller,
+                "line": 4,
+                "column": 10,
+                "json": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let arr = extract_results(&result);
+    assert!(
+        arr.len() >= 6,
+        "expected at least 6 references to greetEntity across both files, got {}: {arr:?}",
+        arr.len()
+    );
+    assert!(
+        arr.iter().any(|r| r["file_path"]
+            .as_str()
+            .is_some_and(|f| f.ends_with("index.ts"))),
+        "expected a reference to greetEntity in index.ts, got: {arr:?}"
     );
 
     client.shutdown().await.unwrap();

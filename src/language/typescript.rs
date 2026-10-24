@@ -19,6 +19,20 @@ pub fn client_capabilities() -> Value {
     })
 }
 
+/// typescript-language-server initialization options.
+///
+/// Disables the syntax-only tsserver (`useSyntaxServer: "never"`). With the
+/// default `"auto"`, typescript-language-server routes definition,
+/// references, hover, rename and similar requests to a syntax server that
+/// knows only the open file while the semantic project is still loading.
+/// The project starts loading at the first `didOpen`, which symtrace-mcp
+/// sends right before the first request, so the first query would otherwise
+/// always get a file-local answer (Issue #30). With `"never"`, requests are
+/// queued until the semantic tsserver has loaded the project.
+pub fn initialization_options() -> Option<Value> {
+    Some(json!({ "tsserver": { "useSyntaxServer": "never" } }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,5 +55,11 @@ mod tests {
             Value::Bool(false),
             "TypeScript capabilities should declare call hierarchy"
         );
+    }
+
+    #[test]
+    fn initialization_options_disable_syntax_server() {
+        let opts = initialization_options().expect("TypeScript should send initialization options");
+        assert_eq!(opts["tsserver"]["useSyntaxServer"], "never");
     }
 }

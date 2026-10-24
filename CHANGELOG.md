@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `incoming_calls` and `outgoing_calls` now work on TypeScript/JavaScript projects. symtrace-mcp now declares the `textDocument.callHierarchy` client capability, without which typescript-language-server did not advertise call hierarchy (#28).
+- `goto_definition`, `find_references`, `hover` and `rename` now return project-wide results on the first query of a TypeScript/JavaScript project instead of file-local ones (e.g. the import line instead of the definition in another file). symtrace-mcp now disables typescript-language-server's syntax-only server (`tsserver.useSyntaxServer: "never"`), which answered requests while the project was still loading. The first query now waits for the project to load (#30).
 
 ## [0.6.0] — 2026-10-23
 
