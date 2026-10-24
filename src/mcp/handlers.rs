@@ -686,6 +686,8 @@ async fn execute_call_hierarchy(
 
     let text = match direction {
         CallDirection::Incoming => {
+            // Sample again: the state may have changed since the prepare step.
+            let before = *entry.index_state.borrow();
             let calls = entry
                 .client
                 .incoming_calls(item)
@@ -706,6 +708,8 @@ async fn execute_call_hierarchy(
             )
         }
         CallDirection::Outgoing => {
+            // Sample again: the state may have changed since the prepare step.
+            let before = *entry.index_state.borrow();
             let calls = entry
                 .client
                 .outgoing_calls(item)
