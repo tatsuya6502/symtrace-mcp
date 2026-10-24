@@ -98,13 +98,7 @@ async fn run_server(cwd: &std::path::Path) {
         "Server started"
     );
 
-    let stats = match StatsRecorder::new(cwd).await {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            tracing::error!(error = %e, "failed to initialize stats database");
-            std::process::exit(1);
-        }
-    };
+    let stats = Arc::new(StatsRecorder::new(cwd).await);
 
     let registry = ProjectRegistry::new(&config, cwd, stats.clone()).unwrap_or_else(|e| {
         tracing::error!(error = %e, "error building project registry");

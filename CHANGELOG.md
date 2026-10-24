@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `incoming_calls` and `outgoing_calls` now work on TypeScript/JavaScript projects. symtrace-mcp now declares the `textDocument.callHierarchy` client capability, without which typescript-language-server did not advertise call hierarchy (#28).
+- The MCP server no longer exits at startup when the stats database cannot be opened, for example because another symtrace-mcp process in the same directory holds its lock. It now logs a warning with the cause and the database path, and runs with usage statistics disabled for that session.
 
 ## [0.6.0] — 2026-10-23
 
