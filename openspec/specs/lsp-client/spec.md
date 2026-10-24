@@ -24,6 +24,21 @@ The system SHALL provide an `LspClient` that manages the full LSP server lifecyc
 - **WHEN** `LspClient` is constructed via `start()`
 - **THEN** it SHALL implement all `LspClientApi` trait methods, delegating to its internal `LspTransport`
 
+### Requirement: Index readiness wait
+After initialization, the system SHALL wait for the language server to finish indexing before accepting queries. It SHALL poll `workspace/symbol` with an empty query every 500 ms (each request bounded to 5 seconds) until a non-empty result is returned, with an overall timeout of 30 seconds. If the server does not advertise `workspaceSymbolProvider`, the wait SHALL be skipped.
+
+#### Scenario: Server becomes ready within timeout
+- **WHEN** the language server returns a non-empty `workspace/symbol` result within the timeout period
+- **THEN** the system SHALL proceed to accept queries
+
+#### Scenario: Server fails to become ready
+- **WHEN** the language server does not return a non-empty `workspace/symbol` result within the timeout period
+- **THEN** the system SHALL log a warning and register the server anyway so that queries can proceed
+
+#### Scenario: Server has no workspace symbol support
+- **WHEN** the server capabilities do not include `workspaceSymbolProvider`
+- **THEN** the system SHALL skip the readiness wait and accept queries immediately
+
 ### Requirement: File management via didOpen/didChange/didClose
 The system SHALL send `textDocument/didOpen` before querying a file, `textDocument/didChange` when the file has been modified since last open (detected by mtime), and `textDocument/didClose` when the file is no longer needed. These methods SHALL be part of the `LspClientApi` trait so that `FileManager` can accept any implementation (including mocks).
 
@@ -38,3 +53,101 @@ The system SHALL send `textDocument/didOpen` before querying a file, `textDocume
 #### Scenario: Closing a file
 - **WHEN** a file is closed via `FileManager::close` or during server shutdown
 - **THEN** the system SHALL send `textDocument/didClose` and remove the file from tracking
+
+### Requirement: LSP query methods
+The system SHALL provide `goto_definition`, `references`, and `implementations` methods that send the corresponding LSP requests and return parsed results.
+
+#### Scenario: goto_definition returns locations
+- **WHEN** `goto_definition` is called with a valid URI and position
+- **THEN** the system SHALL send `textDocument/definition` and return a list of `Location` results
+
+#### Scenario: find_references returns locations
+- **WHEN** `references` is called with a valid URI and position
+- **THEN** the system SHALL send `textDocument/references` with `includeDeclaration: false` and return a list of `Location` results
+
+#### Scenario: find_implementations returns locations
+- **WHEN** `implementations` is called with a valid URI and position
+- **THEN** the system SHALL send `textDocument/implementation` and return a list of `Location` results
+
+#### Scenario: Query returns empty result
+- **WHEN** an LSP query returns `null` or an empty array
+- **THEN** the system SHALL return an empty list (not an error)
+
+### Requirement: Call hierarchy protocol methods
+The system SHALL provide `prepare_call_hierarchy`, `incoming_calls`, and `outgoing_calls` methods on `LspClient`. These implement the two-step LSP callHierarchy protocol: `prepareCallHierarchy` resolves a position to a `CallHierarchyItem`, then `incomingCalls`/`outgoingCalls` retrieve the call relationships.
+
+#### Scenario: prepareCallHierarchy returns items
+- **WHEN** `prepare_call_hierarchy` is called with a valid URI and position
+- **THEN** the system SHALL send `textDocument/prepareCallHierarchy` and return the resulting `CallHierarchyItem` list
+
+#### Scenario: prepareCallHierarchy returns null
+- **WHEN** `prepare_call_hierarchy` returns `null` or an empty array
+- **THEN** the system SHALL return an empty list (not an error)
+
+#### Scenario: incomingCalls returns callers
+- **WHEN** `incoming_calls` is called with a `CallHierarchyItem`
+- **THEN** the system SHALL send `callHierarchy/incomingCalls` with the item and return `CallHierarchyIncomingCall` results
+
+#### Scenario: outgoingCalls returns callees
+- **WHEN** `outgoing_calls` is called with a `CallHierarchyItem`
+- **THEN** the system SHALL send `callHierarchy/outgoingCalls` with the item and return `CallHierarchyOutgoingCall` results
+
+#### Scenario: incomingCalls or outgoingCalls returns null
+- **WHEN** an incoming/outgoing call query returns `null` or an empty array
+- **THEN** the system SHALL return an empty list (not an error)
+
+### Requirement: Call hierarchy capability check
+The system SHALL check `ServerCapabilities.call_hierarchy_provider` before sending any callHierarchy requests. If the capability is absent (`None`), the system SHALL return a protocol error indicating the language server does not support call hierarchy.
+
+#### Scenario: Language server supports call hierarchy
+- **WHEN** `call_hierarchy_provider` is present in server capabilities
+- **THEN** the system SHALL proceed with callHierarchy protocol requests
+
+#### Scenario: Language server does not support call hierarchy
+- **WHEN** `call_hierarchy_provider` is `None` in server capabilities
+- **THEN** the system SHALL return a `ClientError::Protocol` with message indicating call hierarchy is not supported
+
+### Requirement: Hover query method
+The system SHALL provide a `hover` method on `LspClient` that sends `textDocument/hover` with a URI and position, and returns an `Option<Hover>` result.
+
+#### Scenario: Hover returns type information
+- **WHEN** `hover` is called with a valid URI and position
+- **THEN** the system SHALL send `textDocument/hover` and return `Some(Hover)` with the contents and optional range
+
+#### Scenario: Hover returns null
+- **WHEN** `hover` is called and the LSP server returns `null`
+- **THEN** the system SHALL return `None` (not an error)
+
+#### Scenario: Hover capability check
+- **WHEN** `hover_provider` is `None` in server capabilities
+- **THEN** the system SHALL return a `ClientError::Protocol` indicating hover is not supported
+
+### Requirement: Pull diagnostics query method
+The system SHALL provide a `diagnostic` method on `LspClient` that sends `textDocument/diagnostic` with a URI when the server supports pull diagnostics, and otherwise returns the cached push diagnostics for that URI (see the push-diagnostics capability), as a list of `Diagnostic` results.
+
+#### Scenario: Diagnostics returns errors and warnings
+- **WHEN** `diagnostic` is called with a valid URI and the server supports pull diagnostics
+- **THEN** the system SHALL send `textDocument/diagnostic` and return a list of `Diagnostic` entries
+
+#### Scenario: No diagnostics
+- **WHEN** `diagnostic` is called and the LSP server returns an empty list
+- **THEN** the system SHALL return an empty list (not an error)
+
+#### Scenario: Diagnostics capability check
+- **WHEN** `diagnostic_provider` is `None` in server capabilities
+- **THEN** the system SHALL return the cached push diagnostics for the URI, or an empty list when nothing is cached, instead of an error
+
+### Requirement: Rename query method
+The system SHALL provide a `rename` method on `LspClient` that sends `textDocument/rename` with a URI, position, and new name, and returns an `Option<WorkspaceEdit>` result.
+
+#### Scenario: Rename returns workspace edit
+- **WHEN** `rename` is called with a valid URI, position, and new name
+- **THEN** the system SHALL send `textDocument/rename` and return `Some(WorkspaceEdit)` with the proposed changes
+
+#### Scenario: Rename returns null
+- **WHEN** `rename` is called and the LSP server returns `null` (nothing to rename)
+- **THEN** the system SHALL return `None` (not an error)
+
+#### Scenario: Rename capability check
+- **WHEN** `rename_provider` is `None` in server capabilities
+- **THEN** the system SHALL return a `ClientError::Protocol` indicating rename is not supported

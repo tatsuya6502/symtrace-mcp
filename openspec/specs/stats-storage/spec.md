@@ -30,7 +30,7 @@ The system SHALL maintain a `server_events` table with columns: `id` (INTEGER PR
 - **WHEN** the database is newly created
 - **THEN** the `server_events` table and its index exist
 
-### Requirement: Open/write/close pattern
+### Requirement: Shared database handle with multiprocess WAL
 The system SHALL hold a shared `Database` handle and create a new `Connection` via `db.connect()` for each operation. The `Database` SHALL be built with `experimental_multiprocess_wal(true)` to enable concurrent access from the MCP server and the `symtrace-mcp stats` CLI.
 
 #### Scenario: Tool call records stats
