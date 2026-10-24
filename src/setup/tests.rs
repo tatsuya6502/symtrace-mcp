@@ -264,7 +264,7 @@ fn existing_claude_md_content_is_preserved() {
     let original = "# My notes\n\n<!-- ast-bro:begin v=4.2.0 -->\nuse sb\n<!-- ast-bro:end -->\n";
     fs::write(&e.targets.claude_md, original).unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[0], ("prompt", "created"));
+    assert_eq!(statuses(&r)[0], ("prompt", "updated"));
     assert_eq!(
         read(&e.targets.claude_md),
         format!("{original}\n{}", block())
@@ -280,7 +280,7 @@ fn explore_shadowed_by_other_tool_gets_appended_block() {
     );
     fs::write(&e.targets.explore_md, &original).unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[1], ("explore", "created"));
+    assert_eq!(statuses(&r)[1], ("explore", "updated"));
     assert_eq!(
         read(&e.targets.explore_md),
         format!("{original}\n{}", block())
@@ -344,7 +344,7 @@ fn crlf_claude_md_stays_crlf_and_unchanged_on_rerun() {
     fs::create_dir_all(e.targets.claude_md.parent().unwrap()).unwrap();
     fs::write(&e.targets.claude_md, "# notes\r\nline\r\n").unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[0], ("prompt", "created"));
+    assert_eq!(statuses(&r)[0], ("prompt", "updated"));
     let text = read(&e.targets.claude_md);
     assert_eq!(
         text,
@@ -477,7 +477,7 @@ fn settings_with_unrelated_hook_and_keys() {
     )
     .unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[2], ("hook", "created"));
+    assert_eq!(statuses(&r)[2], ("hook", "updated"));
     let settings = read_json(&e.targets.settings_json);
     assert_eq!(settings["statusLine"], original["statusLine"]);
     assert_eq!(settings["permissions"], original["permissions"]);
@@ -561,7 +561,7 @@ fn claude_json_other_keys_kept() {
     )
     .unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[3], ("mcp", "created"));
+    assert_eq!(statuses(&r)[3], ("mcp", "updated"));
     let v = read_json(&e.targets.mcp_json);
     let mut expected = original.clone();
     expected["mcpServers"]["symtrace-mcp"] = json!({ "command": "symtrace-mcp", "args": [] });
@@ -671,7 +671,7 @@ fn explore_md_without_tool_restriction_warns() {
     fs::write(&e.targets.explore_md, foreign).unwrap();
 
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[1], ("explore", "created"));
+    assert_eq!(statuses(&r)[1], ("explore", "updated"));
     assert_eq!(r.exit_code, 0);
     assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
     assert!(r.warnings[0].contains("disallowedTools: Write, Edit, NotebookEdit"));
@@ -829,6 +829,36 @@ fn status_on_partial_install() {
     );
     assert_eq!(r.exit_code, 0, "status never fails");
     assert_eq!(read(&e.targets.claude_md), old, "status never writes");
+}
+
+#[test]
+fn status_after_full_install() {
+    let e = env();
+    execute(&args(), &e.targets);
+    let r = execute(
+        &SetupArgs {
+            status: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    let installed = format!("installed v{VERSION}");
+    assert_eq!(statuses(&r), all(&r, installed.as_str()));
+    assert_eq!(r.exit_code, 0);
+}
+
+#[test]
+fn whitespace_only_files_report_created() {
+    let e = env();
+    fs::create_dir_all(e.targets.claude_md.parent().unwrap()).unwrap();
+    fs::write(&e.targets.claude_md, " \n\n").unwrap();
+    fs::write(&e.targets.settings_json, "\n  \n").unwrap();
+    fs::write(&e.targets.mcp_json, " \t\n").unwrap();
+    let r = execute(&args(), &e.targets);
+    assert_eq!(statuses(&r), all(&r, "created"));
+    assert_eq!(r.exit_code, 0);
+    assert_eq!(hook_commands(&read_json(&e.targets.settings_json)).len(), 2);
+    assert!(read_json(&e.targets.mcp_json)["mcpServers"]["symtrace-mcp"].is_object());
 }
 
 #[test]
