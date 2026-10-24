@@ -16,6 +16,13 @@ fn fixture_index() -> PathBuf {
     p
 }
 
+/// Absolute path to the TypeScript fixture's caller.ts.
+fn fixture_caller() -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("fixtures/ts-project/caller.ts");
+    p
+}
+
 async fn spawn_client() -> McpClient {
     common::require_command("typescript-language-server");
 
@@ -178,8 +185,67 @@ async fn test_find_implementations() {
     client.shutdown().await.unwrap();
 }
 
-// typescript-language-server does not support the LSP Call Hierarchy protocol.
-// incoming_calls and outgoing_calls are only tested with rust-analyzer.
+#[tokio::test]
+async fn test_incoming_calls_cross_file() {
+    let mut client = spawn_client().await;
+    let index = fixture_index().to_str().unwrap().to_string();
+
+    // Incoming calls to `greetEntity` (line 21, col 10), which caller.ts imports and calls
+    let result = client
+        .tools_call(
+            "incoming_calls",
+            json!({
+                "file_path": index,
+                "line": 21,
+                "column": 10,
+                "json": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let arr = extract_results(&result);
+    assert!(
+        !arr.is_empty(),
+        "expected at least one incoming call to greetEntity"
+    );
+    assert!(
+        arr.iter().any(|c| c["file_path"]
+            .as_str()
+            .is_some_and(|f| f.ends_with("caller.ts"))),
+        "expected a caller of greetEntity in caller.ts, got: {arr:?}"
+    );
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_outgoing_calls() {
+    let mut client = spawn_client().await;
+    let caller = fixture_caller().to_str().unwrap().to_string();
+
+    // Outgoing calls from `useGreeting` in caller.ts (line 3, col 17)
+    let result = client
+        .tools_call(
+            "outgoing_calls",
+            json!({
+                "file_path": caller,
+                "line": 3,
+                "column": 17,
+                "json": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let arr = extract_results(&result);
+    assert!(
+        !arr.is_empty(),
+        "expected at least one outgoing call from useGreeting"
+    );
+
+    client.shutdown().await.unwrap();
+}
 
 #[tokio::test]
 async fn test_hover() {

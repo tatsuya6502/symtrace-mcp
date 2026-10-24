@@ -27,3 +27,4 @@ greetEntity(user);
 
 const admin = new Admin(user);
 greetEntity(admin);
+export { greetEntity, User };
