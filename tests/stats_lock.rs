@@ -4,10 +4,9 @@
 //! file lock, and the test depends on the timing of two child processes.
 //! Run with `cargo test --test stats_lock -- --ignored`.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_symtrace-mcp");
@@ -58,10 +57,11 @@ fn second_server_starts_when_stats_db_is_locked() {
     // Give A a moment to finish schema setup after creating the WAL file.
     std::thread::sleep(Duration::from_millis(500));
 
-    // Process B: same directory, so its stats open hits A's lock.
-    let mut b = spawn_server(cwd, &log_b);
+    // Process B: same directory, so its stats open hits A's lock. Wrapped in
+    // KillOnDrop so the timeout path below does not leak it.
+    let mut b = KillOnDrop(spawn_server(cwd, &log_b));
     {
-        let mut stdin = b.stdin.take().unwrap();
+        let mut stdin = b.0.stdin.take().unwrap();
         let requests = [
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"stats_lock","version":"0"}}}"#,
             r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
@@ -73,14 +73,38 @@ fn second_server_starts_when_stats_db_is_locked() {
         // Dropping stdin closes it, so B exits after answering.
     }
 
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(b.wait_with_output());
+    // Drain stdout and stderr on their own threads so B never blocks on a
+    // full pipe while the main thread polls for its exit.
+    let mut stdout = b.0.stdout.take().unwrap();
+    let mut stderr = b.0.stderr.take().unwrap();
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
     });
-    let output = rx
-        .recv_timeout(Duration::from_secs(30))
-        .expect("process B did not exit within 30 s")
-        .expect("failed to wait for process B");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        buf
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = b.0.try_wait().expect("failed to wait for process B") {
+            break status;
+        }
+        // Panicking here drops `b`, which kills process B.
+        assert!(
+            Instant::now() < deadline,
+            "process B did not exit within 30 s"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let output = std::process::Output {
+        status,
+        stdout: stdout_reader.join().unwrap(),
+        stderr: stderr_reader.join().unwrap(),
+    };
 
     assert!(
         output.status.success(),

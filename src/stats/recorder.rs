@@ -178,14 +178,14 @@ impl StatsRecorder {
     }
 
     #[cfg(test)]
-    fn db_for_test(&self) -> &turso::Database {
+    pub(crate) fn db_for_test(&self) -> &turso::Database {
         self.db
             .as_ref()
             .expect("stats recorder is disabled; no database available")
     }
 
     #[cfg(test)]
-    fn is_enabled(&self) -> bool {
+    pub(crate) fn is_enabled(&self) -> bool {
         self.db.is_some()
     }
 
