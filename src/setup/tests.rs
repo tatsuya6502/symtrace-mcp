@@ -130,7 +130,11 @@ fn fresh_install_creates_four_items() {
     let line = r.lines[0].to_string();
     assert_eq!(
         line,
-        format!("prompt   created    {}", e.targets.claude_md.display())
+        format!(
+            "prompt   created{}  {}",
+            " ".repeat(15),
+            e.targets.claude_md.display()
+        )
     );
 }
 
@@ -845,6 +849,51 @@ fn status_after_full_install() {
     let installed = format!("installed v{VERSION}");
     assert_eq!(statuses(&r), all(&r, installed.as_str()));
     assert_eq!(r.exit_code, 0);
+}
+
+#[test]
+fn status_version_only_for_entries_running_this_binary() {
+    let e = env();
+    execute(&args(), &e.targets);
+    // An absolute path to some other binary named `symtrace-mcp`.
+    let other = e.home.join("old-install").join("symtrace-mcp");
+    fs::create_dir_all(other.parent().unwrap()).unwrap();
+    fs::write(&other, "").unwrap();
+    let other = other.display().to_string();
+    let status = || {
+        let r = execute(
+            &SetupArgs {
+                status: true,
+                skip_prompt: true,
+                skip_explore: true,
+                ..args()
+            },
+            &e.targets,
+        );
+        [r.lines[2].status.clone(), r.lines[3].status.clone()]
+    };
+    let versioned = format!("installed v{VERSION}");
+    assert_eq!(status(), [versioned.clone(), versioned.clone()]);
+
+    let mut settings = read_json(&e.targets.settings_json);
+    settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = json!(format!("{other} hook"));
+    fs::write(&e.targets.settings_json, settings.to_string()).unwrap();
+    let mut mcp = read_json(&e.targets.mcp_json);
+    mcp["mcpServers"]["symtrace-mcp"]["command"] = json!(other);
+    fs::write(&e.targets.mcp_json, mcp.to_string()).unwrap();
+    assert_eq!(status(), ["installed", "installed"]);
+
+    // A path that resolves to the running binary keeps the version (a
+    // symlink, since the test binary itself is not named `symtrace-mcp`).
+    #[cfg(unix)]
+    {
+        let link = e.home.join("bin").join("symtrace-mcp");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(std::env::current_exe().unwrap(), &link).unwrap();
+        mcp["mcpServers"]["symtrace-mcp"]["command"] = json!(link.display().to_string());
+        fs::write(&e.targets.mcp_json, mcp.to_string()).unwrap();
+        assert_eq!(status(), ["installed".to_string(), versioned]);
+    }
 }
 
 #[test]

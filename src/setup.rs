@@ -155,7 +155,7 @@ impl std::fmt::Display for ItemLine {
         }
         write!(
             f,
-            "{:<7}  {:<9}  {}",
+            "{:<7}  {:<22}  {}",
             self.item,
             self.status,
             self.path.display()
@@ -408,16 +408,23 @@ fn markdown_item(
 
 /// Install-mode word for a JSON item that added or replaced our content:
 /// `created` only when the file was missing or blank before the run.
-fn json_install_word(path: &Path) -> Result<&'static str, SetupError> {
-    Ok(if json_file::is_missing_or_blank(path)? {
-        "created"
+fn json_install_word(blank: bool) -> &'static str {
+    if blank { "created" } else { "updated" }
+}
+
+/// Status word for an installed JSON item: `installed v{VERSION}` only when
+/// every command the entries run is this binary; an entry pointing at
+/// another install says nothing about that install's version.
+fn json_installed_word<'a>(mut commands: impl Iterator<Item = &'a str>) -> String {
+    if commands.all(preflight::is_running_binary) {
+        format!("installed v{VERSION}")
     } else {
-        "updated"
-    })
+        "installed".into()
+    }
 }
 
 fn hook_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
-    let mut value = json_file::load(path)?;
+    let (mut value, blank) = json_file::load(path)?;
     let present = HOOK_MATCHERS
         .iter()
         .map(|m| json_file::has_hook(&value, m))
@@ -426,7 +433,7 @@ fn hook_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
     let any = present.iter().any(|&p| p);
     match mode {
         Mode::Status => Ok(if all {
-            format!("installed v{VERSION}")
+            json_installed_word(json_file::hook_binaries(&value)?.into_iter())
         } else if any {
             "modified".into()
         } else {
@@ -442,7 +449,7 @@ fn hook_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
             if !changed {
                 return Ok("unchanged".into());
             }
-            let status = json_install_word(path)?;
+            let status = json_install_word(blank);
             if ctx.write {
                 json_file::save(path, &value)?;
             }
@@ -461,18 +468,18 @@ fn hook_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
 }
 
 fn mcp_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
-    let mut value = json_file::load(path)?;
+    let (mut value, blank) = json_file::load(path)?;
     match mode {
         Mode::Status => Ok(match json_file::mcp_state(&value)? {
             McpState::Absent => "absent".into(),
-            McpState::Current => format!("installed v{VERSION}"),
+            McpState::Current => json_installed_word(json_file::mcp_command(&value)?.into_iter()),
             McpState::Modified => "modified".into(),
         }),
         Mode::Install => {
             let status = match json_file::upsert_mcp(&mut value, ctx.force)? {
                 McpChange::Unchanged => return Ok("unchanged".into()),
                 McpChange::Modified => return Ok(MODIFIED.into()),
-                McpChange::Created => json_install_word(path)?,
+                McpChange::Created => json_install_word(blank),
                 McpChange::Updated => "updated",
             };
             if ctx.write {

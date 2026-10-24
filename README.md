@@ -132,6 +132,8 @@ cd symtrace-mcp
 cargo install --path .
 ```
 
+Check which version is installed with `symtrace-mcp --version` (or `-V`).
+
 Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
 
 ### Claude Code integration
@@ -159,7 +161,7 @@ Options:
 - `--dry-run`: print what would change without writing
 - `--skip-prompt` / `--skip-explore` / `--skip-hook` / `--skip-mcp`: leave that item alone
 - `--force`: replace a block or MCP entry you edited by hand (otherwise `setup` refuses and exits non-zero)
-- `--status`: show `installed` / `outdated` / `modified` / `absent` per item
+- `--status`: show `installed v<version>` / `outdated v<version>` / `modified` / `absent` per item. The hook and MCP entries record no version, so they show the running binary's version when their command is the bare `symtrace-mcp` or a path to the running binary, and a bare `installed` when it points at another install
 - `--uninstall`: remove only what `setup` added; other content in those files is preserved
 
 Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code: run `cargo install --path .` before `setup`. If `PATH` resolves to a different binary than the one running `setup` (for example an older install while you run `target/debug/symtrace-mcp`), `setup` prints a warning; an old binary without the `hook` subcommand would make Claude Code block every `Bash` and `Grep` call.
