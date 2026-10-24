@@ -22,9 +22,9 @@ pub fn client_capabilities() -> Value {
 
 /// rust-analyzer initialization options.
 ///
-/// Always `None`: rust-analyzer treats `initializationOptions` as its own
-/// configuration, so symtrace-mcp sends none and the field is omitted from
-/// the `initialize` request.
+/// Always `None`: rust-analyzer needs no initialization options, so the
+/// field is omitted from the `initialize` request. `initializationOptions`
+/// is optional in the LSP spec, and omitting it is the canonical form.
 pub fn initialization_options() -> Option<Value> {
     None
 }

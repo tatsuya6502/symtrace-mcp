@@ -15,7 +15,7 @@
 
 - [x] 3.1 In `tests/integration_ts.rs` add a `spawn_cold_client()` helper that calls `common::require_command("typescript-language-server")` and `McpClient::spawn(&cwd)` on `fixtures/ts-project` WITHOUT `wait_for_ready`, with a comment explaining why (the readiness poll's own `goto_definition` would open a file and move later queries out of the project-loading window); keep `spawn_client()` and all existing tests unchanged
 - [x] 3.2 Add `test_goto_definition_first_call_cross_file`: on a fresh `spawn_cold_client()`, the FIRST `tools/call` is `goto_definition` on `fixture_caller()` line 4, column 10 with `json: true`; assert the first result's `file_path` ends with `index.ts` and its `line` is 21
-- [x] 3.3 Add `test_find_references_first_call_cross_file`: on a fresh `spawn_cold_client()`, the FIRST `tools/call` is `find_references` on the same position with `json: true`; assert at least 6 results and at least one whose `file_path` ends with `index.ts`
+- [x] 3.3 Add `test_find_references_first_call_cross_file`: on a fresh `spawn_cold_client()`, the FIRST `tools/call` is `find_references` on the same position with `json: true`; assert at least 5 results, at least one whose `file_path` ends with `index.ts`, and at least one whose `file_path` ends with `caller.ts`
 - [x] 3.4 Confirm the new tests catch the bug: temporarily make `typescript::initialization_options()` return `None`, run `cargo test --features integration-typescript first_call -- --test-threads=1` and see both new tests fail (import line / 2 same-file references), then restore the option and see them pass; do not commit the temporary change
 
 ## 4. Changelog and final verification

@@ -642,8 +642,9 @@ impl LspClient {
 /// Build the `initialize` request params.
 ///
 /// `initializationOptions` is inserted only when `initialization_options` is
-/// `Some`; for `None` the field is omitted rather than sent as `null`
-/// (rust-analyzer would read `null` as its configuration).
+/// `Some`; for `None` the field is omitted rather than sent as `null`.
+/// `initializationOptions` is optional in the LSP spec, and omitting it is
+/// the canonical form.
 fn build_initialize_params(
     root_uri: &str,
     root: &Path,
