@@ -356,7 +356,13 @@ fn markdown_item(
                         let base = format!("{fm}{eol}{}", text.trim_start_matches(['\r', '\n']));
                         (marker_block::insert_at_end(&base, &block), "updated")
                     }
-                    _ => (marker_block::insert_at_end(text, &block), "created"),
+                    // CLAUDE.md missing or blank: the file is created.
+                    _ if text.trim().is_empty() => {
+                        (marker_block::insert_at_end(text, &block), "created")
+                    }
+                    // Existing content (CLAUDE.md, or Explore.md with its
+                    // own frontmatter): the block is appended.
+                    _ => (marker_block::insert_at_end(text, &block), "updated"),
                 },
                 State::Outdated(_) => (
                     marker_block::replace_in_place(text, &block).expect("classified as a block"),
@@ -400,6 +406,16 @@ fn markdown_item(
     }
 }
 
+/// Install-mode word for a JSON item that added or replaced our content:
+/// `created` only when the file was missing or blank before the run.
+fn json_install_word(path: &Path) -> Result<&'static str, SetupError> {
+    Ok(if json_file::is_missing_or_blank(path)? {
+        "created"
+    } else {
+        "updated"
+    })
+}
+
 fn hook_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
     let mut value = json_file::load(path)?;
     let present = HOOK_MATCHERS
@@ -410,7 +426,7 @@ fn hook_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
     let any = present.iter().any(|&p| p);
     match mode {
         Mode::Status => Ok(if all {
-            "installed".into()
+            format!("installed v{VERSION}")
         } else if any {
             "modified".into()
         } else {
@@ -426,10 +442,11 @@ fn hook_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
             if !changed {
                 return Ok("unchanged".into());
             }
+            let status = json_install_word(path)?;
             if ctx.write {
                 json_file::save(path, &value)?;
             }
-            Ok(if any { "updated" } else { "created" }.into())
+            Ok(status.into())
         }
         Mode::Uninstall => {
             if !json_file::remove_hooks(&mut value)? {
@@ -448,14 +465,14 @@ fn mcp_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
     match mode {
         Mode::Status => Ok(match json_file::mcp_state(&value)? {
             McpState::Absent => "absent".into(),
-            McpState::Current => "installed".into(),
+            McpState::Current => format!("installed v{VERSION}"),
             McpState::Modified => "modified".into(),
         }),
         Mode::Install => {
             let status = match json_file::upsert_mcp(&mut value, ctx.force)? {
                 McpChange::Unchanged => return Ok("unchanged".into()),
                 McpChange::Modified => return Ok(MODIFIED.into()),
-                McpChange::Created => "created",
+                McpChange::Created => json_install_word(path)?,
                 McpChange::Updated => "updated",
             };
             if ctx.write {

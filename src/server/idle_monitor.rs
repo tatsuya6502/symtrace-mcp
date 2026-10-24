@@ -43,10 +43,13 @@ impl IdleMonitor {
         let languages: Vec<Language> = last_used.keys().copied().collect();
 
         for language in languages {
-            let idle_timeout = manager
-                .config_for(language)
-                .map(|cfg| Duration::from_secs(cfg.idle_timeout_secs))
-                .unwrap_or(Duration::from_secs(300));
+            // Only languages with a config can have a running server.
+            let Some(cfg) = manager.config_for(language) else {
+                tracing::warn!(language = ?language, "no server config; untracking");
+                last_used.remove(&language);
+                continue;
+            };
+            let idle_timeout = Duration::from_secs(cfg.idle_timeout_secs);
 
             let should_shutdown = match last_used.get(&language) {
                 Some(last) => last.elapsed() >= idle_timeout,
@@ -74,5 +77,29 @@ impl IdleMonitor {
                 last_used = self.last_used.lock().await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::server::manager::LanguageServerManager;
+
+    #[tokio::test]
+    async fn language_without_config_is_untracked() {
+        let dir = tempfile::tempdir().unwrap();
+        let stats = Arc::new(StatsRecorder::new(dir.path()).await.unwrap());
+        let manager = LanguageServerManager::with_configs(
+            PathBuf::from("/tmp/test"),
+            HashMap::new(),
+            HashMap::new(),
+            stats.clone(),
+        );
+        let monitor = IdleMonitor::new(stats);
+        monitor.touch(Language::Rust).await;
+        monitor.check_and_shutdown_idle(&manager).await;
+        assert!(!monitor.last_used.lock().await.contains_key(&Language::Rust));
     }
 }

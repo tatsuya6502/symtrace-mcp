@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `symtrace-mcp --version` / `-V` print the version (#27).
+
 ### Fixed
 
+- `setup` reports `updated`, not `created`, when it adds its block or entry to a file that already existed (Explore.md written by another tool, an existing CLAUDE.md, settings.json or `.claude.json`) (#27).
+- `setup --status` shows `installed v<version>` for the hook and MCP rows too, so all four rows read the same (#27).
 - `incoming_calls` and `outgoing_calls` now work on TypeScript/JavaScript projects. symtrace-mcp now declares the `textDocument.callHierarchy` client capability, without which typescript-language-server did not advertise call hierarchy (#28).
 
 ## [0.6.0] — 2026-10-23

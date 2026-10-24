@@ -23,16 +23,26 @@ pub const MCP_NAME: &str = "symtrace-mcp";
 /// Matchers that get a `PreToolUse` entry.
 pub const HOOK_MATCHERS: [&str; 2] = ["Bash", "Grep"];
 
+/// Read `path`; `None` when it is missing, empty or whitespace-only.
+fn read_non_blank(path: &Path) -> Result<Option<String>, SetupError> {
+    match fs::read_to_string(path) {
+        Ok(t) if t.trim().is_empty() => Ok(None),
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(SetupError::Io(path.to_path_buf(), e)),
+    }
+}
+
+/// Is `path` missing, empty or whitespace-only (the files `load` reads as `{}`)?
+pub fn is_missing_or_blank(path: &Path) -> Result<bool, SetupError> {
+    Ok(read_non_blank(path)?.is_none())
+}
+
 /// Load a JSON object. A missing, empty or whitespace-only file yields `{}`.
 pub fn load(path: &Path) -> Result<Value, SetupError> {
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
-        Err(e) => return Err(SetupError::Io(path.to_path_buf(), e)),
-    };
-    if text.trim().is_empty() {
+    let Some(text) = read_non_blank(path)? else {
         return Ok(json!({}));
-    }
+    };
     let value: Value = serde_json::from_str(&text)
         .map_err(|e| SetupError::JsonParse(path.to_path_buf(), e.to_string()))?;
     if !value.is_object() {
@@ -612,6 +622,19 @@ mod tests {
         assert!(err.contains("s.json"), "{err}");
         fs::write(&path, "[1]").unwrap();
         assert!(load(&path).is_err());
+    }
+
+    #[test]
+    fn missing_or_blank_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.json");
+        assert!(is_missing_or_blank(&path).unwrap());
+        fs::write(&path, "").unwrap();
+        assert!(is_missing_or_blank(&path).unwrap());
+        fs::write(&path, " \r\n\t\n").unwrap();
+        assert!(is_missing_or_blank(&path).unwrap());
+        fs::write(&path, "{}").unwrap();
+        assert!(!is_missing_or_blank(&path).unwrap());
     }
 
     #[cfg(unix)]
