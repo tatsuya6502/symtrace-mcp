@@ -20,7 +20,7 @@ When the stats database cannot be opened, `symtrace-mcp` exits with status 1 at 
 
 ### Modified Capabilities
 
-- `stats-storage`: adds the requirement that a stats database initialization failure is non-fatal (server starts, stats writes become no-ops, a warning is logged with the cause).
+- `stats-storage`: adds the requirement that a stats database initialization failure is non-fatal (server starts, stats writes become no-ops, a warning is logged with the cause when a log subscriber is active). Modifies "Stats database location" and "Data retention with 30-day rolling window" so that creating `.symtrace/` / `stats.db` and the retention cleanup apply only when stats recording is enabled.
 - `stats-instrumentation`: adds the requirement that recording on a disabled stats recorder leaves tool responses and server lifecycle unaffected and logs nothing per call.
 
 ## Impact
