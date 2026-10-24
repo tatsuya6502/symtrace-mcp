@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `incoming_calls` and `outgoing_calls` now work on TypeScript/JavaScript projects. symtrace-mcp now declares the `textDocument.callHierarchy` client capability, without which typescript-language-server did not advertise call hierarchy (#28).
 - The first queries on a large Rust workspace no longer return empty results before rust-analyzer has finished loading it (#29). The index wait now follows rust-analyzer's `experimental/serverStatus` notification instead of giving up after 5 empty `workspace/symbol` polls, and a query that comes back empty while rust-analyzer is still indexing returns a "language server is still indexing the workspace; retry in a few seconds" error instead of an empty answer.
-- `symtrace-mcp stats` always reported `uptime 0s total` for language servers because stop events were recorded without a duration. Each stop now records the time since the server was spawned; only stops recorded after upgrading count toward uptime (#25)
-- An idle-timeout shutdown recorded an extra `manual` stop event alongside the `idle_timeout` one; each stop now records exactly one event (#25)
+- `symtrace-mcp stats` always reported `uptime 0s total` for language servers because stop events were recorded without a duration. Each stop now records the time since the server was spawned; only stops recorded after upgrading count toward uptime (#25).
+- An idle-timeout shutdown recorded an extra `manual` stop event alongside the `idle_timeout` one; each stop now records exactly one event (#25).
 
 ## [0.6.0] — 2026-10-23
 

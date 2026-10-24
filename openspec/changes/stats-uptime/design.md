@@ -38,15 +38,16 @@ See proposal.md (Why). Current state in code:
 Add in `manager.rs`:
 
 ```rust
-pub(crate) enum StopReason { Manual, IdleTimeout, SessionEnd }
-impl StopReason { fn as_str(&self) -> &'static str { /* "manual" | "idle_timeout" | "session_end" */ } }
+pub(crate) enum StopReason { IdleTimeout, SessionEnd }
+impl StopReason { fn as_str(&self) -> &'static str { /* "idle_timeout" | "session_end" */ } }
 ```
 
-- `pub(crate) async fn stop_server_with_reason(&self, language, reason: StopReason)` does the remove → `close_all` → `shutdown` → record sequence. The public `stop_server(language)` delegates with `StopReason::Manual`, so its signature is unchanged.
+- `pub(crate) async fn stop_server_with_reason(&self, language, reason: StopReason)` does the remove → `close_all` → `shutdown` → record sequence.
+- The public `stop_server(language)` and the `Manual` reason are removed. `stop_server` had no caller outside tests (the idle monitor was its only production caller and now uses `stop_server_with_reason`), so `manual` described an unreachable path. Keeping it would have needed `#[cfg_attr(not(test), expect(dead_code))]`, which turns into a build error the day a real caller appears, so the dead path is deleted instead. A future explicit-stop feature can add a reason back.
 - `shutdown_all` records with `StopReason::SessionEnd` through a shared private helper that records one row from an entry's `started_at` and a reason. Both methods use it so the row format lives in one place.
 - The `stopped` row is recorded before the shutdown error is propagated: once the entry is removed, the server is gone from the manager's point of view, so the stop is counted either way, and the error is still returned to the caller.
 - No entry for the language → no row (matches today's `stop_server`; fixes the idle monitor's unconditional row).
-- Considered: a `&str` reason parameter. Rejected: the enum makes the three spec'd values the only possible ones.
+- Considered: a `&str` reason parameter. Rejected: the enum makes the spec'd values the only possible ones.
 
 ### D3. `IdleMonitor` no longer records stats
 

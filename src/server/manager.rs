@@ -126,9 +126,6 @@ pub(crate) struct ServerEntry {
 
 /// Why a language server was stopped, recorded as the `detail` of the `stopped` row.
 pub(crate) enum StopReason {
-    // Only `stop_server` constructs it; that method has no non-test caller yet.
-    #[cfg_attr(not(test), expect(dead_code))]
-    Manual,
     IdleTimeout,
     SessionEnd,
 }
@@ -136,7 +133,6 @@ pub(crate) enum StopReason {
 impl StopReason {
     fn as_str(&self) -> &'static str {
         match self {
-            Self::Manual => "manual",
             Self::IdleTimeout => "idle_timeout",
             Self::SessionEnd => "session_end",
         }
@@ -331,13 +327,6 @@ impl LanguageServerManager {
         }
     }
 
-    /// Stop a specific language server.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub async fn stop_server(&self, language: Language) -> Result<(), ManagerError> {
-        self.stop_server_with_reason(language, StopReason::Manual)
-            .await
-    }
-
     /// Stop a specific language server and record the stop with `reason`.
     ///
     /// Records nothing when no server is running for `language`. If the LSP
@@ -350,13 +339,9 @@ impl LanguageServerManager {
     ) -> Result<(), ManagerError> {
         let mut servers = self.servers.lock().await;
         if let Some(entry) = servers.remove(&language) {
-            let started_at = entry.started_at;
-            let mut client = entry.client;
-            let mut fm = entry.file_manager;
-            fm.close_all(&mut *client).await;
-            let result = client.shutdown().await;
-            self.record_stopped(language, started_at, &reason).await;
-            result.map_err(ManagerError::from)?;
+            self.tear_down(language, entry, &reason)
+                .await
+                .map_err(ManagerError::from)?;
         }
         Ok(())
     }
@@ -367,15 +352,30 @@ impl LanguageServerManager {
         let languages: Vec<Language> = servers.keys().copied().collect();
         for language in languages {
             if let Some(entry) = servers.remove(&language) {
-                let started_at = entry.started_at;
-                let mut client = entry.client;
-                let mut fm = entry.file_manager;
-                fm.close_all(&mut *client).await;
-                let _ = client.shutdown().await;
-                self.record_stopped(language, started_at, &StopReason::SessionEnd)
+                let _ = self
+                    .tear_down(language, entry, &StopReason::SessionEnd)
                     .await;
             }
         }
+    }
+
+    /// Close open files, shut down the server, and record one `stopped` row.
+    ///
+    /// The row is recorded even if the LSP `shutdown` request fails; the
+    /// shutdown result is returned to the caller.
+    async fn tear_down(
+        &self,
+        language: Language,
+        entry: ServerEntry,
+        reason: &StopReason,
+    ) -> Result<(), ClientError> {
+        let started_at = entry.started_at;
+        let mut client = entry.client;
+        let mut fm = entry.file_manager;
+        fm.close_all(&mut *client).await;
+        let result = client.shutdown().await;
+        self.record_stopped(language, started_at, reason).await;
+        result
     }
 
     /// Record one `stopped` row with the time elapsed since `started_at`.
@@ -471,6 +471,7 @@ mod tests {
 
     use crate::lsp::client::{ClientError, MockLspClientApi};
     use crate::lsp::types::{Diagnostic, Location, Position, Range, TextEdit, WorkspaceEdit};
+    use std::time::{Duration, Instant};
 
     fn test_pos() -> Position {
         Position {
@@ -765,8 +766,6 @@ mod tests {
 
     // --- Stop instrumentation tests ---
 
-    use std::time::{Duration, Instant};
-
     fn test_manager(stats: Arc<StatsRecorder>) -> LanguageServerManager {
         LanguageServerManager::with_configs(
             PathBuf::from("/tmp/test"),
@@ -821,21 +820,8 @@ mod tests {
 
     #[test]
     fn stop_reason_as_str() {
-        assert_eq!(StopReason::Manual.as_str(), "manual");
         assert_eq!(StopReason::IdleTimeout.as_str(), "idle_timeout");
         assert_eq!(StopReason::SessionEnd.as_str(), "session_end");
-    }
-
-    #[tokio::test]
-    async fn stop_server_records_manual_with_duration() {
-        let (_dir, stats) = test_stats().await;
-        let manager = test_manager(stats.clone());
-        insert_running(&manager, Language::Rust, || Ok(())).await;
-
-        manager.stop_server(Language::Rust).await.unwrap();
-
-        assert!(manager.servers.lock().await.is_empty());
-        assert_one_stop(&stopped_rows(&stats).await, "Rust", "manual");
     }
 
     #[tokio::test]
@@ -849,6 +835,7 @@ mod tests {
             .await
             .unwrap();
 
+        assert!(manager.servers.lock().await.is_empty());
         assert_one_stop(&stopped_rows(&stats).await, "Rust", "idle_timeout");
     }
 
@@ -893,13 +880,15 @@ mod tests {
         })
         .await;
 
-        let result = manager.stop_server(Language::Rust).await;
+        let result = manager
+            .stop_server_with_reason(Language::Rust, StopReason::IdleTimeout)
+            .await;
 
         assert!(matches!(
             result,
             Err(ManagerError::ClientError(ClientError::Transport(ref msg))) if msg == "broken pipe"
         ));
         assert!(manager.servers.lock().await.is_empty());
-        assert_one_stop(&stopped_rows(&stats).await, "Rust", "manual");
+        assert_one_stop(&stopped_rows(&stats).await, "Rust", "idle_timeout");
     }
 }
