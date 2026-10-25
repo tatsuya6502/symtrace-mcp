@@ -6,7 +6,7 @@ Loads `.symtrace.toml` from the working directory at startup to define projects 
 ## Requirements
 
 ### Requirement: Configuration loaded from .symtrace.toml
-The system SHALL read configuration from a `.symtrace.toml` file located in the current working directory (CWD) at startup. The `[server]` section SHALL accept arbitrary language keys including `"rust"` and `"typescript"`. Each key maps to a `ServerConfig` with `command`, optional `idle_timeout_secs` and optional `index_timeout_secs`. Each `[[projects]]` entry SHALL accept an optional `env` field as an inline table mapping environment variable names to values. The optional `[logging]` section SHALL accept a `level` field with values: `off`, `error`, `warn`, `info`, `debug`, `trace`, or `tracing-subscriber::filter::Targets` filter syntax. The default value for `level` SHALL be `info`.
+The system SHALL read configuration from a `.symtrace.toml` file located in the current working directory (CWD) at startup. The `[server]` section SHALL accept arbitrary language keys including `"rust"` and `"typescript"`. Each key maps to a `ServerConfig` with optional `command`, optional `idle_timeout_secs` and optional `index_timeout_secs`. An omitted `command` SHALL keep that language's default command. Each `[[projects]]` entry SHALL accept an optional `env` field as an inline table mapping environment variable names to values. The optional `[logging]` section SHALL accept a `level` field with values: `off`, `error`, `warn`, `info`, `debug`, `trace`, or `tracing-subscriber::filter::Targets` filter syntax. The default value for `level` SHALL be `info`.
 
 #### Scenario: Config file exists and is valid
 - **WHEN** `.symtrace.toml` exists in CWD and contains valid TOML
@@ -52,6 +52,10 @@ The system SHALL read configuration from a `.symtrace.toml` file located in the 
 - **WHEN** `.symtrace.toml` contains `[server.rust]` with `command = "rust-analyzer"` and `index_timeout_secs = 180`
 - **THEN** the system SHALL parse `index_timeout_secs` as 180 for the Rust server config
 
+#### Scenario: Server section without command
+- **WHEN** `.symtrace.toml` contains `[server.rust]` with only `index_timeout_secs = 600`
+- **THEN** the system SHALL start, use `rust-analyzer` as the Rust server command, and wait up to 600 seconds for it to become ready
+
 #### Scenario: Invalid index timeout value
 - **WHEN** `index_timeout_secs` is negative, not an integer, or greater than 86400 (one day)
 - **THEN** the system SHALL return a descriptive error and refuse to start
@@ -83,8 +87,12 @@ The `[server.<language>]` section SHALL define language server command, idle tim
 - **THEN** all Rust projects SHALL wait up to 180 seconds for rust-analyzer to become ready
 
 #### Scenario: Index timeout omitted
-- **WHEN** the config contains `[server.rust]` with a `command` but no `index_timeout_secs`
+- **WHEN** the config contains `[server.rust]` without `index_timeout_secs`
 - **THEN** all Rust projects SHALL wait up to 30 seconds for rust-analyzer to become ready
+
+#### Scenario: Server command omitted
+- **WHEN** the config contains `[server.typescript]` with `idle_timeout_secs` but no `command`
+- **THEN** all TypeScript projects SHALL use the default `typescript-language-server --stdio` with that idle timeout
 
 ### Requirement: Project root paths are canonicalized
 All project root paths from the config SHALL be canonicalized (resolved to absolute paths with symlinks followed) before being used for routing.

@@ -1,4 +1,6 @@
 reviews:
+  auto_review:
+    enabled: false
   path_filters:
     - "!.claude/commands/opsx/**"
     - "!.claude/skills/openspec-*/**"
