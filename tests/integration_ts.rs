@@ -458,6 +458,8 @@ async fn test_hover_first_call_cross_file() {
 async fn test_rename_first_call_cross_file() {
     let mut client = spawn_cold_client().await;
     let index = fixture_index().to_str().unwrap().to_string();
+    let index_before = std::fs::read_to_string(fixture_index()).unwrap();
+    let caller_before = std::fs::read_to_string(fixture_caller()).unwrap();
 
     // First tools/call of the session: rename (preview only, no file
     // mutation) on `greetEntity` in the `export { greetEntity, User }`
@@ -490,6 +492,17 @@ async fn test_rename_first_call_cross_file() {
             "first rename should edit {file}, got: {data}"
         );
     }
+    // The rename is a preview: neither fixture file may change.
+    assert_eq!(
+        std::fs::read_to_string(fixture_index()).unwrap(),
+        index_before,
+        "rename must not modify index.ts"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture_caller()).unwrap(),
+        caller_before,
+        "rename must not modify caller.ts"
+    );
 
     client.shutdown().await.unwrap();
 }
