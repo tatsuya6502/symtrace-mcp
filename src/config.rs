@@ -20,7 +20,8 @@ pub struct LoggingConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerConfig {
-    pub command: String,
+    /// Language server command. `None` keeps the language's default command.
+    pub command: Option<String>,
     #[serde(default = "default_idle_timeout")]
     pub idle_timeout_secs: u64,
     #[serde(
@@ -151,7 +152,10 @@ root = "project-b"
         assert_eq!(config.projects.len(), 2);
         assert_eq!(config.projects[0].root, PathBuf::from("project-a"));
         assert_eq!(config.projects[1].root, PathBuf::from("project-b"));
-        assert_eq!(config.server["rust"].command, "rust-analyzer");
+        assert_eq!(
+            config.server["rust"].command.as_deref(),
+            Some("rust-analyzer")
+        );
     }
 
     #[test]
@@ -170,7 +174,10 @@ command = "/custom/rust-analyzer"
 
         let config = SymtraceConfig::load(&config_path).unwrap();
         assert!(config.projects.is_empty());
-        assert_eq!(config.server["rust"].command, "/custom/rust-analyzer");
+        assert_eq!(
+            config.server["rust"].command.as_deref(),
+            Some("/custom/rust-analyzer")
+        );
     }
 
     #[test]
@@ -213,10 +220,13 @@ root = "my-project"
         .unwrap();
 
         let config = SymtraceConfig::load(&config_path).unwrap();
-        assert_eq!(config.server["rust"].command, "rust-analyzer");
         assert_eq!(
-            config.server["typescript"].command,
-            "typescript-language-server"
+            config.server["rust"].command.as_deref(),
+            Some("rust-analyzer")
+        );
+        assert_eq!(
+            config.server["typescript"].command.as_deref(),
+            Some("typescript-language-server")
         );
     }
 
@@ -407,5 +417,25 @@ index_timeout_secs = 86400
 
         let config = SymtraceConfig::load(&config_path).unwrap();
         assert_eq!(config.server["rust"].index_timeout_secs, 86_400);
+    }
+
+    #[test]
+    fn load_server_without_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".symtrace.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[server.rust]
+index_timeout_secs = 600
+"#,
+        )
+        .unwrap();
+
+        let config = SymtraceConfig::load(&config_path).unwrap();
+        let rust = &config.server["rust"];
+        assert!(rust.command.is_none());
+        assert_eq!(rust.index_timeout_secs, 600);
+        assert_eq!(rust.idle_timeout_secs, 600);
     }
 }

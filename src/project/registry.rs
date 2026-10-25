@@ -152,7 +152,9 @@ impl ProjectRegistry {
             if let Some(lang) = target
                 && let Some(lang_cfg) = configs.get_mut(&lang)
             {
-                lang_cfg.command = cfg.command.clone();
+                if let Some(command) = &cfg.command {
+                    lang_cfg.command = command.clone();
+                }
                 lang_cfg.idle_timeout_secs = cfg.idle_timeout_secs;
                 lang_cfg.index_timeout_secs = cfg.index_timeout_secs;
             }
@@ -286,5 +288,39 @@ index_timeout_secs = 180
         let configs = ProjectRegistry::build_server_configs(&config.server);
         assert_eq!(configs[&Language::Rust].index_timeout_secs, 180);
         assert_eq!(configs[&Language::TypeScript].index_timeout_secs, 30);
+    }
+
+    #[test]
+    fn rust_section_without_command_keeps_default_command() {
+        let config: SymtraceConfig = toml::from_str(
+            r#"
+[server.rust]
+index_timeout_secs = 600
+"#,
+        )
+        .unwrap();
+
+        let configs = ProjectRegistry::build_server_configs(&config.server);
+        let rust = &configs[&Language::Rust];
+        assert_eq!(rust.command, "rust-analyzer");
+        assert_eq!(rust.index_timeout_secs, 600);
+        assert_eq!(configs[&Language::TypeScript].index_timeout_secs, 30);
+    }
+
+    #[test]
+    fn typescript_section_without_command_keeps_default_command() {
+        let config: SymtraceConfig = toml::from_str(
+            r#"
+[server.typescript]
+idle_timeout_secs = 120
+"#,
+        )
+        .unwrap();
+
+        let configs = ProjectRegistry::build_server_configs(&config.server);
+        let ts = &configs[&Language::TypeScript];
+        assert_eq!(ts.command, "typescript-language-server");
+        assert_eq!(ts.args, vec!["--stdio".to_string()]);
+        assert_eq!(ts.idle_timeout_secs, 120);
     }
 }
