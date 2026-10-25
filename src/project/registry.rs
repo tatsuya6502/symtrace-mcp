@@ -198,7 +198,8 @@ mod tests {
 
     async fn test_stats() -> (tempfile::TempDir, Arc<StatsRecorder>) {
         let dir = tempfile::tempdir().unwrap();
-        let recorder = StatsRecorder::new(dir.path()).await.unwrap();
+        let recorder = StatsRecorder::new(dir.path()).await;
+        assert!(recorder.is_enabled(), "test stats recorder failed to open");
         (dir, Arc::new(recorder))
     }
 
