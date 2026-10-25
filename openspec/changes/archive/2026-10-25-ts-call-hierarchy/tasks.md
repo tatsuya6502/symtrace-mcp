@@ -22,6 +22,6 @@
 - [x] 4.1 Run `cargo clippy --all-targets --tests -- -D warnings` and verify it reports no warnings
 - [x] 4.2 Run `cargo fmt --all -- --check` and verify it reports no diffs
 - [x] 4.3 Run `cargo test` and verify all unit tests pass
-- [ ] 4.4 Sanity-check on a real multi-package workspace with a TypeScript frontend that `incoming_calls` on an exported hook imported by other files returns its callers (record the result in the PR without naming the workspace); CI now covers the cross-file case via 2.2, so this is a release check, not the only coverage
+- [x] 4.4 Sanity-check on a real multi-package workspace with a TypeScript frontend that `incoming_calls` on an exported hook imported by other files returns its callers (record the result in the PR without naming the workspace); CI now covers the cross-file case via 2.2, so this is a release check, not the only coverage
 - [x] 4.5 Run `cargo test --features integration-rust -- --test-threads=1` and verify the Rust call hierarchy tests still pass with the added client capability
 - [x] 4.6 Run `cargo test --features integration-typescript -- --test-threads=1` as the last step and verify all TypeScript integration tests pass, including the existing position-based tests (unchanged `index.ts` lines 1-29), `test_incoming_calls_cross_file` and `test_outgoing_calls`
