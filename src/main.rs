@@ -19,7 +19,7 @@ use project::registry::ProjectRegistry;
 use stats::StatsRecorder;
 
 #[derive(Parser)]
-#[command(name = "symtrace-mcp")]
+#[command(name = "symtrace-mcp", version)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -109,5 +109,43 @@ async fn run_server(cwd: &std::path::Path) {
     if let Err(e) = server.run().await {
         tracing::error!(error = %e, "server error");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+    use clap::error::ErrorKind;
+
+    use super::*;
+
+    #[test]
+    fn version_comes_from_cargo() {
+        assert_eq!(
+            Cli::command().get_version(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn version_flags_print_name_and_version() {
+        for flag in ["--version", "-V"] {
+            let err = match Cli::try_parse_from(["symtrace-mcp", flag]) {
+                Ok(_) => panic!("{flag} should not parse into a command"),
+                Err(e) => e,
+            };
+            assert_eq!(err.kind(), ErrorKind::DisplayVersion, "{flag}");
+            assert_eq!(
+                err.render().to_string(),
+                format!("symtrace-mcp {}\n", env!("CARGO_PKG_VERSION")),
+                "{flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_arguments_runs_the_server() {
+        let cli = Cli::try_parse_from(["symtrace-mcp"]).unwrap();
+        assert!(cli.command.is_none());
     }
 }

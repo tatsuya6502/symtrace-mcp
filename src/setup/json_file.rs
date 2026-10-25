@@ -5,7 +5,6 @@
 //! order survives a round trip), mutated only at our own paths, and written
 //! back atomically. The mutation helpers are pure functions over `Value`.
 
-use std::fs;
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
@@ -23,16 +22,12 @@ pub const MCP_NAME: &str = "symtrace-mcp";
 /// Matchers that get a `PreToolUse` entry.
 pub const HOOK_MATCHERS: [&str; 2] = ["Bash", "Grep"];
 
-/// Load a JSON object. A missing, empty or whitespace-only file yields `{}`.
-pub fn load(path: &Path) -> Result<Value, SetupError> {
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
-        Err(e) => return Err(SetupError::Io(path.to_path_buf(), e)),
+/// Load a JSON object. A missing, empty or whitespace-only file yields `{}`;
+/// the returned flag is `true` in exactly that case.
+pub fn load(path: &Path) -> Result<(Value, bool), SetupError> {
+    let Some(text) = super::read_optional(path)?.filter(|t| !t.trim().is_empty()) else {
+        return Ok((json!({}), true));
     };
-    if text.trim().is_empty() {
-        return Ok(json!({}));
-    }
     let value: Value = serde_json::from_str(&text)
         .map_err(|e| SetupError::JsonParse(path.to_path_buf(), e.to_string()))?;
     if !value.is_object() {
@@ -41,7 +36,7 @@ pub fn load(path: &Path) -> Result<Value, SetupError> {
             "top-level value is not an object".into(),
         ));
     }
-    Ok(value)
+    Ok((value, false))
 }
 
 /// Write `value` pretty-printed (two-space indent, trailing newline) to
@@ -80,6 +75,44 @@ fn is_our_hook_command(command: &str) -> bool {
         return false;
     };
     prefix.is_empty() || prefix.ends_with('/') || prefix.ends_with(char::is_whitespace)
+}
+
+/// The binary an `is_our_hook_command` command runs: the last word before
+/// ` hook` (`VAR=x /p/symtrace-mcp hook` gives `/p/symtrace-mcp`).
+///
+/// `None` when the command does not establish which executable runs: a bare
+/// name behind a command-local `PATH=...` assignment, or any word before the
+/// binary that is not a `NAME=value` assignment (`env`, `nice`, ...).
+fn hook_binary(command: &str) -> Option<&str> {
+    let mut words = command.trim().strip_suffix(" hook")?.split_whitespace();
+    let binary = words.next_back()?;
+    let mut path_overridden = false;
+    for word in words {
+        let (name, _) = word.split_once('=')?;
+        if name == "PATH" {
+            path_overridden = true;
+        }
+    }
+    if path_overridden && !binary.contains('/') {
+        return None;
+    }
+    Some(binary)
+}
+
+/// The binary of every hook object of ours in `hooks.PreToolUse`; `None`
+/// for a hook whose command does not establish which binary runs.
+pub fn hook_binaries(root: &Value) -> Result<Vec<Option<&str>>, SetupError> {
+    let Some(entries) = pre_tool_use(root)? else {
+        return Ok(Vec::new());
+    };
+    Ok(entries
+        .iter()
+        .filter_map(|e| e.get("hooks").and_then(Value::as_array))
+        .flatten()
+        .filter(|h| is_our_hook(h))
+        .filter_map(|h| h.get("command").and_then(Value::as_str))
+        .map(hook_binary)
+        .collect())
 }
 
 fn entry_matcher(entry: &Value) -> Option<&str> {
@@ -285,6 +318,14 @@ pub fn mcp_state(root: &Value) -> Result<McpState, SetupError> {
     })
 }
 
+/// The `command` of `mcpServers.symtrace-mcp`, if any.
+pub fn mcp_command(root: &Value) -> Result<Option<&str>, SetupError> {
+    Ok(mcp_servers(root)?
+        .and_then(|s| s.get(MCP_NAME))
+        .and_then(|v| v.get("command"))
+        .and_then(Value::as_str))
+}
+
 /// Ensure `mcpServers.symtrace-mcp == {"command": "symtrace-mcp", "args": []}`.
 pub fn upsert_mcp(root: &mut Value, force: bool) -> Result<McpChange, SetupError> {
     let state = mcp_state(root)?;
@@ -319,6 +360,7 @@ pub fn remove_mcp(root: &mut Value) -> Result<bool, SetupError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn settings_with_read_hook() -> Value {
         json!({
@@ -584,7 +626,7 @@ mod tests {
     fn load_and_save_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("settings.json");
-        assert_eq!(load(&path).unwrap(), json!({}));
+        assert_eq!(load(&path).unwrap(), (json!({}), true));
         let v = json!({ "z": 1, "a": { "y": [1, 2], "b": null } });
         save(&path, &v).unwrap();
         let text = fs::read_to_string(&path).unwrap();
@@ -592,7 +634,7 @@ mod tests {
             text,
             "{\n  \"z\": 1,\n  \"a\": {\n    \"y\": [\n      1,\n      2\n    ],\n    \"b\": null\n  }\n}\n"
         );
-        assert_eq!(load(&path).unwrap(), v);
+        assert_eq!(load(&path).unwrap(), (v, false));
         // No leftover temp file.
         let names: Vec<_> = fs::read_dir(path.parent().unwrap())
             .unwrap()
@@ -606,12 +648,66 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("s.json");
         fs::write(&path, "  \n").unwrap();
-        assert_eq!(load(&path).unwrap(), json!({}));
+        assert_eq!(load(&path).unwrap(), (json!({}), true));
         fs::write(&path, "{ not json").unwrap();
         let err = load(&path).unwrap_err().to_string();
         assert!(err.contains("s.json"), "{err}");
         fs::write(&path, "[1]").unwrap();
         assert!(load(&path).is_err());
+    }
+
+    #[test]
+    fn missing_or_blank_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.json");
+        let blank = |p: &Path| load(p).unwrap().1;
+        assert!(blank(&path));
+        fs::write(&path, "").unwrap();
+        assert!(blank(&path));
+        fs::write(&path, " \r\n\t\n").unwrap();
+        assert!(blank(&path));
+        fs::write(&path, "{}").unwrap();
+        assert!(!blank(&path));
+    }
+
+    #[test]
+    fn hook_binaries_and_mcp_command() {
+        let v = json!({
+            "hooks": { "PreToolUse": [
+                { "matcher": "Bash", "hooks": [
+                    { "type": "command", "command": "other" },
+                    { "type": "command", "command": "VAR=x /opt/bin/symtrace-mcp hook" }
+                ] },
+                { "matcher": "Grep", "hooks": [ { "type": "command", "command": HOOK_COMMAND } ] }
+            ] },
+            "mcpServers": { MCP_NAME: { "command": "/opt/bin/symtrace-mcp" } }
+        });
+        assert_eq!(
+            hook_binaries(&v).unwrap(),
+            [Some("/opt/bin/symtrace-mcp"), Some("symtrace-mcp")]
+        );
+        assert_eq!(mcp_command(&v).unwrap(), Some("/opt/bin/symtrace-mcp"));
+        assert!(hook_binaries(&json!({})).unwrap().is_empty());
+        assert_eq!(mcp_command(&json!({})).unwrap(), None);
+    }
+
+    #[test]
+    fn hook_binary_only_when_the_executable_is_established() {
+        assert_eq!(hook_binary("symtrace-mcp hook"), Some("symtrace-mcp"));
+        assert_eq!(
+            hook_binary("VAR=x /opt/bin/symtrace-mcp hook"),
+            Some("/opt/bin/symtrace-mcp")
+        );
+        // A command-local PATH decides which bare `symtrace-mcp` runs.
+        assert_eq!(hook_binary("PATH=/opt/old:$PATH symtrace-mcp hook"), None);
+        // ...but not which absolute path runs.
+        assert_eq!(
+            hook_binary("PATH=/opt/old:$PATH /opt/bin/symtrace-mcp hook"),
+            Some("/opt/bin/symtrace-mcp")
+        );
+        // A wrapper word may change resolution too.
+        assert_eq!(hook_binary("env symtrace-mcp hook"), None);
+        assert_eq!(hook_binary("symtrace-mcp"), None);
     }
 
     #[cfg(unix)]
@@ -630,7 +726,7 @@ mod tests {
                 .file_type()
                 .is_symlink()
         );
-        assert_eq!(load(&real).unwrap(), json!({ "a": 1 }));
+        assert_eq!(load(&real).unwrap().0, json!({ "a": 1 }));
     }
 
     #[cfg(unix)]

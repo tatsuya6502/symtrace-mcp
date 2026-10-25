@@ -130,7 +130,11 @@ fn fresh_install_creates_four_items() {
     let line = r.lines[0].to_string();
     assert_eq!(
         line,
-        format!("prompt   created    {}", e.targets.claude_md.display())
+        format!(
+            "prompt   created{}  {}",
+            " ".repeat(15),
+            e.targets.claude_md.display()
+        )
     );
 }
 
@@ -264,7 +268,7 @@ fn existing_claude_md_content_is_preserved() {
     let original = "# My notes\n\n<!-- ast-bro:begin v=4.2.0 -->\nuse sb\n<!-- ast-bro:end -->\n";
     fs::write(&e.targets.claude_md, original).unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[0], ("prompt", "created"));
+    assert_eq!(statuses(&r)[0], ("prompt", "updated"));
     assert_eq!(
         read(&e.targets.claude_md),
         format!("{original}\n{}", block())
@@ -280,7 +284,7 @@ fn explore_shadowed_by_other_tool_gets_appended_block() {
     );
     fs::write(&e.targets.explore_md, &original).unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[1], ("explore", "created"));
+    assert_eq!(statuses(&r)[1], ("explore", "updated"));
     assert_eq!(
         read(&e.targets.explore_md),
         format!("{original}\n{}", block())
@@ -344,7 +348,7 @@ fn crlf_claude_md_stays_crlf_and_unchanged_on_rerun() {
     fs::create_dir_all(e.targets.claude_md.parent().unwrap()).unwrap();
     fs::write(&e.targets.claude_md, "# notes\r\nline\r\n").unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[0], ("prompt", "created"));
+    assert_eq!(statuses(&r)[0], ("prompt", "updated"));
     let text = read(&e.targets.claude_md);
     assert_eq!(
         text,
@@ -477,7 +481,7 @@ fn settings_with_unrelated_hook_and_keys() {
     )
     .unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[2], ("hook", "created"));
+    assert_eq!(statuses(&r)[2], ("hook", "updated"));
     let settings = read_json(&e.targets.settings_json);
     assert_eq!(settings["statusLine"], original["statusLine"]);
     assert_eq!(settings["permissions"], original["permissions"]);
@@ -561,7 +565,7 @@ fn claude_json_other_keys_kept() {
     )
     .unwrap();
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[3], ("mcp", "created"));
+    assert_eq!(statuses(&r)[3], ("mcp", "updated"));
     let v = read_json(&e.targets.mcp_json);
     let mut expected = original.clone();
     expected["mcpServers"]["symtrace-mcp"] = json!({ "command": "symtrace-mcp", "args": [] });
@@ -671,7 +675,7 @@ fn explore_md_without_tool_restriction_warns() {
     fs::write(&e.targets.explore_md, foreign).unwrap();
 
     let r = execute(&args(), &e.targets);
-    assert_eq!(statuses(&r)[1], ("explore", "created"));
+    assert_eq!(statuses(&r)[1], ("explore", "updated"));
     assert_eq!(r.exit_code, 0);
     assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
     assert!(r.warnings[0].contains("disallowedTools: Write, Edit, NotebookEdit"));
@@ -829,6 +833,108 @@ fn status_on_partial_install() {
     );
     assert_eq!(r.exit_code, 0, "status never fails");
     assert_eq!(read(&e.targets.claude_md), old, "status never writes");
+}
+
+#[test]
+fn status_after_full_install() {
+    let e = env();
+    execute(&args(), &e.targets);
+    let r = execute(
+        &SetupArgs {
+            status: true,
+            ..args()
+        },
+        &e.targets,
+    );
+    let installed = format!("installed v{VERSION}");
+    assert_eq!(statuses(&r), all(&r, installed.as_str()));
+    assert_eq!(r.exit_code, 0);
+}
+
+#[test]
+fn status_version_only_for_entries_running_this_binary() {
+    let e = env();
+    execute(&args(), &e.targets);
+    // An absolute path to some other binary named `symtrace-mcp`.
+    let other = e.home.join("old-install").join("symtrace-mcp");
+    fs::create_dir_all(other.parent().unwrap()).unwrap();
+    fs::write(&other, "").unwrap();
+    let other = other.display().to_string();
+    let status = || {
+        let r = execute(
+            &SetupArgs {
+                status: true,
+                skip_prompt: true,
+                skip_explore: true,
+                ..args()
+            },
+            &e.targets,
+        );
+        [r.lines[2].status.clone(), r.lines[3].status.clone()]
+    };
+    let versioned = format!("installed v{VERSION}");
+    assert_eq!(status(), [versioned.clone(), versioned.clone()]);
+
+    let mut settings = read_json(&e.targets.settings_json);
+    settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = json!(format!("{other} hook"));
+    fs::write(&e.targets.settings_json, settings.to_string()).unwrap();
+    let mut mcp = read_json(&e.targets.mcp_json);
+    mcp["mcpServers"]["symtrace-mcp"]["command"] = json!(other);
+    fs::write(&e.targets.mcp_json, mcp.to_string()).unwrap();
+    assert_eq!(status(), ["installed", "installed"]);
+
+    // A path that resolves to the running binary keeps the version (a
+    // symlink, since the test binary itself is not named `symtrace-mcp`).
+    #[cfg(unix)]
+    {
+        let link = e.home.join("bin").join("symtrace-mcp");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(std::env::current_exe().unwrap(), &link).unwrap();
+        mcp["mcpServers"]["symtrace-mcp"]["command"] = json!(link.display().to_string());
+        fs::write(&e.targets.mcp_json, mcp.to_string()).unwrap();
+        assert_eq!(status(), ["installed".to_string(), versioned]);
+    }
+}
+
+#[test]
+fn status_no_version_when_hook_path_is_overridden() {
+    let e = env();
+    execute(&args(), &e.targets);
+    let status = || {
+        let r = execute(
+            &SetupArgs {
+                status: true,
+                skip_prompt: true,
+                skip_explore: true,
+                ..args()
+            },
+            &e.targets,
+        );
+        r.lines[2].status.clone()
+    };
+    assert_eq!(status(), format!("installed v{VERSION}"));
+
+    // A command-local PATH may pick another `symtrace-mcp`, so the bare name
+    // no longer says which binary the hook runs.
+    let mut settings = read_json(&e.targets.settings_json);
+    settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"] =
+        json!("PATH=/opt/old:$PATH symtrace-mcp hook");
+    fs::write(&e.targets.settings_json, settings.to_string()).unwrap();
+    assert_eq!(status(), "installed");
+}
+
+#[test]
+fn whitespace_only_files_report_created() {
+    let e = env();
+    fs::create_dir_all(e.targets.claude_md.parent().unwrap()).unwrap();
+    fs::write(&e.targets.claude_md, " \n\n").unwrap();
+    fs::write(&e.targets.settings_json, "\n  \n").unwrap();
+    fs::write(&e.targets.mcp_json, " \t\n").unwrap();
+    let r = execute(&args(), &e.targets);
+    assert_eq!(statuses(&r), all(&r, "created"));
+    assert_eq!(r.exit_code, 0);
+    assert_eq!(hook_commands(&read_json(&e.targets.settings_json)).len(), 2);
+    assert!(read_json(&e.targets.mcp_json)["mcpServers"]["symtrace-mcp"].is_object());
 }
 
 #[test]
