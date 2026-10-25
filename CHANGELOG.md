@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An idle-timeout shutdown recorded an extra `manual` stop event alongside the `idle_timeout` one; each stop now records exactly one event (#25).
 - The MCP server no longer exits at startup when the stats database cannot be opened, for example because another symtrace-mcp process in the same directory holds its lock. It now logs a warning with the cause and the database path, and runs with usage statistics disabled for that session.
 - `goto_definition`, `find_references`, `hover` and `rename` now return project-wide results on the first query of a TypeScript/JavaScript project instead of file-local ones (e.g. the import line instead of the definition in another file). symtrace-mcp now disables typescript-language-server's syntax-only server (`tsserver.useSyntaxServer: "never"`), which answered requests while the project was still loading. The first query now waits for the project to load (#30).
+- A `[server.<lang>]` section in `.symtrace.toml` no longer requires `command`. Omitting it keeps the default language server (`rust-analyzer` or `typescript-language-server --stdio`), so `index_timeout_secs` or `idle_timeout_secs` can be set on their own; before, such a file failed to parse with `missing field command` and the MCP server did not start.
 
 ## [0.6.0] — 2026-10-23
 
