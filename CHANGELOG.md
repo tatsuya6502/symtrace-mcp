@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-25
+
 ### Added
 
 - `index_timeout_secs` option in `[server.<lang>]` of `.symtrace.toml` (default 30, at most 86400): how long the first tool call waits for the language server to finish loading the workspace; `0` skips the wait. Raise it for large Rust workspaces.
@@ -81,7 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README roadmap table, CI badges, and plugin conflict documentation (#12)
 - Claude Code LSP plugins investigation document (#13)
 
-[Unreleased]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/tatsuya6502/symtrace-mcp/compare/v0.1.0...v0.5.0
