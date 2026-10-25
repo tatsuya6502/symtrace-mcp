@@ -450,6 +450,7 @@ impl LspClient {
         args: &[&str],
         root: &Path,
         client_capabilities: Value,
+        initialization_options: Option<Value>,
         env: &HashMap<String, String>,
     ) -> Result<Self, ClientError> {
         let root_uri = path_to_uri(root);
@@ -458,12 +459,8 @@ impl LspClient {
             .map_err(|e| ClientError::Transport(e.to_string()))?;
 
         // Send initialize request.
-        let init_params = serde_json::json!({
-            "processId": std::process::id(),
-            "rootUri": &root_uri,
-            "rootPath": root,
-            "capabilities": client_capabilities,
-        });
+        let init_params =
+            build_initialize_params(&root_uri, root, client_capabilities, initialization_options);
 
         let result = transport
             .send_request("initialize", init_params)
@@ -842,6 +839,30 @@ async fn handle_notification(
     }
 }
 
+/// Build the `initialize` request params.
+///
+/// `initializationOptions` is inserted only when `initialization_options` is
+/// `Some`; for `None` the field is omitted rather than sent as `null`.
+/// `initializationOptions` is optional in the LSP spec, and omitting it is
+/// the canonical form.
+fn build_initialize_params(
+    root_uri: &str,
+    root: &Path,
+    client_capabilities: Value,
+    initialization_options: Option<Value>,
+) -> Value {
+    let mut params = serde_json::json!({
+        "processId": std::process::id(),
+        "rootUri": root_uri,
+        "rootPath": root,
+        "capabilities": client_capabilities,
+    });
+    if let Some(opts) = initialization_options {
+        params["initializationOptions"] = opts;
+    }
+    params
+}
+
 /// Parse a GotoDefinitionResponse / ReferenceResponse into a flat list of
 /// locations. LSP spec allows: `Location[]`, `LocationLink[]`, or `null`.
 fn parse_location_list(value: &Value) -> Vec<super::types::Location> {
@@ -885,6 +906,34 @@ fn provider_enabled(provider: &Option<Value>) -> bool {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn initialize_params_include_initialization_options_when_some() {
+        let opts = serde_json::json!({ "tsserver": { "useSyntaxServer": "never" } });
+        let params = build_initialize_params(
+            "file:///tmp/project",
+            Path::new("/tmp/project"),
+            serde_json::json!({}),
+            Some(opts.clone()),
+        );
+        assert_eq!(params["initializationOptions"], opts);
+        assert_eq!(params["rootUri"], "file:///tmp/project");
+    }
+
+    #[test]
+    fn initialize_params_omit_initialization_options_when_none() {
+        let params = build_initialize_params(
+            "file:///tmp/project",
+            Path::new("/tmp/project"),
+            serde_json::json!({}),
+            None,
+        );
+        assert!(
+            params.get("initializationOptions").is_none(),
+            "initializationOptions must be absent, not null"
+        );
+        assert!(params.get("capabilities").is_some());
+    }
 
     #[test]
     fn provider_enabled_none() {
