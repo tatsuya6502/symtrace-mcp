@@ -415,8 +415,10 @@ fn json_install_word(blank: bool) -> &'static str {
 /// Status word for an installed JSON item: `installed v{VERSION}` only when
 /// every command the entries run is this binary; an entry pointing at
 /// another install says nothing about that install's version.
-fn json_installed_word<'a>(mut commands: impl Iterator<Item = &'a str>) -> String {
-    if commands.all(preflight::is_running_binary) {
+/// `installed v<version>` when every command runs this binary; a `None`
+/// command (binary not established) counts as not running it.
+fn json_installed_word<'a>(mut commands: impl Iterator<Item = Option<&'a str>>) -> String {
+    if commands.all(|c| c.is_some_and(preflight::is_running_binary)) {
         format!("installed v{VERSION}")
     } else {
         "installed".into()
@@ -472,7 +474,9 @@ fn mcp_item(ctx: &Ctx, path: &Path, mode: Mode) -> Result<String, SetupError> {
     match mode {
         Mode::Status => Ok(match json_file::mcp_state(&value)? {
             McpState::Absent => "absent".into(),
-            McpState::Current => json_installed_word(json_file::mcp_command(&value)?.into_iter()),
+            McpState::Current => {
+                json_installed_word(std::iter::once(json_file::mcp_command(&value)?))
+            }
             McpState::Modified => "modified".into(),
         }),
         Mode::Install => {

@@ -897,6 +897,33 @@ fn status_version_only_for_entries_running_this_binary() {
 }
 
 #[test]
+fn status_no_version_when_hook_path_is_overridden() {
+    let e = env();
+    execute(&args(), &e.targets);
+    let status = || {
+        let r = execute(
+            &SetupArgs {
+                status: true,
+                skip_prompt: true,
+                skip_explore: true,
+                ..args()
+            },
+            &e.targets,
+        );
+        r.lines[2].status.clone()
+    };
+    assert_eq!(status(), format!("installed v{VERSION}"));
+
+    // A command-local PATH may pick another `symtrace-mcp`, so the bare name
+    // no longer says which binary the hook runs.
+    let mut settings = read_json(&e.targets.settings_json);
+    settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"] =
+        json!("PATH=/opt/old:$PATH symtrace-mcp hook");
+    fs::write(&e.targets.settings_json, settings.to_string()).unwrap();
+    assert_eq!(status(), "installed");
+}
+
+#[test]
 fn whitespace_only_files_report_created() {
     let e = env();
     fs::create_dir_all(e.targets.claude_md.parent().unwrap()).unwrap();

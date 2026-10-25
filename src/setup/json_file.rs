@@ -79,16 +79,29 @@ fn is_our_hook_command(command: &str) -> bool {
 
 /// The binary an `is_our_hook_command` command runs: the last word before
 /// ` hook` (`VAR=x /p/symtrace-mcp hook` gives `/p/symtrace-mcp`).
+///
+/// `None` when the command does not establish which executable runs: a bare
+/// name behind a command-local `PATH=...` assignment, or any word before the
+/// binary that is not a `NAME=value` assignment (`env`, `nice`, ...).
 fn hook_binary(command: &str) -> Option<&str> {
-    command
-        .trim()
-        .strip_suffix(" hook")?
-        .split_whitespace()
-        .next_back()
+    let mut words = command.trim().strip_suffix(" hook")?.split_whitespace();
+    let binary = words.next_back()?;
+    let mut path_overridden = false;
+    for word in words {
+        let (name, _) = word.split_once('=')?;
+        if name == "PATH" {
+            path_overridden = true;
+        }
+    }
+    if path_overridden && !binary.contains('/') {
+        return None;
+    }
+    Some(binary)
 }
 
-/// The binary of every hook object of ours in `hooks.PreToolUse`.
-pub fn hook_binaries(root: &Value) -> Result<Vec<&str>, SetupError> {
+/// The binary of every hook object of ours in `hooks.PreToolUse`; `None`
+/// for a hook whose command does not establish which binary runs.
+pub fn hook_binaries(root: &Value) -> Result<Vec<Option<&str>>, SetupError> {
     let Some(entries) = pre_tool_use(root)? else {
         return Ok(Vec::new());
     };
@@ -98,7 +111,7 @@ pub fn hook_binaries(root: &Value) -> Result<Vec<&str>, SetupError> {
         .flatten()
         .filter(|h| is_our_hook(h))
         .filter_map(|h| h.get("command").and_then(Value::as_str))
-        .filter_map(hook_binary)
+        .map(hook_binary)
         .collect())
 }
 
@@ -671,11 +684,30 @@ mod tests {
         });
         assert_eq!(
             hook_binaries(&v).unwrap(),
-            ["/opt/bin/symtrace-mcp", "symtrace-mcp"]
+            [Some("/opt/bin/symtrace-mcp"), Some("symtrace-mcp")]
         );
         assert_eq!(mcp_command(&v).unwrap(), Some("/opt/bin/symtrace-mcp"));
         assert!(hook_binaries(&json!({})).unwrap().is_empty());
         assert_eq!(mcp_command(&json!({})).unwrap(), None);
+    }
+
+    #[test]
+    fn hook_binary_only_when_the_executable_is_established() {
+        assert_eq!(hook_binary("symtrace-mcp hook"), Some("symtrace-mcp"));
+        assert_eq!(
+            hook_binary("VAR=x /opt/bin/symtrace-mcp hook"),
+            Some("/opt/bin/symtrace-mcp")
+        );
+        // A command-local PATH decides which bare `symtrace-mcp` runs.
+        assert_eq!(hook_binary("PATH=/opt/old:$PATH symtrace-mcp hook"), None);
+        // ...but not which absolute path runs.
+        assert_eq!(
+            hook_binary("PATH=/opt/old:$PATH /opt/bin/symtrace-mcp hook"),
+            Some("/opt/bin/symtrace-mcp")
+        );
+        // A wrapper word may change resolution too.
+        assert_eq!(hook_binary("env symtrace-mcp hook"), None);
+        assert_eq!(hook_binary("symtrace-mcp"), None);
     }
 
     #[cfg(unix)]

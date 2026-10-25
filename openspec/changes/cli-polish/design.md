@@ -44,5 +44,5 @@ Replace `.map(...).unwrap_or(Duration::from_secs(300))` with `let Some(cfg) = ma
 ## Risks / Trade-offs
 
 - [Scripts that match `created` on existing files see `updated`] → Pre-1.0 CLI, the output is human-oriented, and the change is listed under `### Fixed` in CHANGELOG.
-- [`installed v<binary version>` for hook/MCP could be read as "the entry records this version"] → The entry has no version; the spec text says the version is the running binary's. The hook command runs whatever `symtrace-mcp` is on `PATH`, which the existing PATH preflight warning already covers.
+- [`installed v<binary version>` for hook/MCP could be read as "the entry records this version"] → The entry has no version; the spec text says the version is the running binary's. The hook command runs whatever `symtrace-mcp` is on `PATH`, which the existing PATH preflight warning already covers; a command-local `PATH=...` assignment (or a wrapper word such as `env`) escapes that warning, so such a command gets a bare `installed`.
 - [A blank-but-existing JSON file reported as `created`] → Deliberate: nothing of the user's is preserved, same as a blank Explore.md today.
