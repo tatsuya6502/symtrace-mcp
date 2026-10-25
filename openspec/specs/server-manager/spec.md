@@ -89,3 +89,67 @@ The system SHALL provide TypeScript-specific client capabilities that match `typ
 #### Scenario: Server spawned with project env vars
 - **WHEN** a language server is started for a manager that has environment variables configured
 - **THEN** the spawned process SHALL inherit the parent environment with the configured variables added or overridden
+
+### Requirement: Call hierarchy client capability
+For every supported language, the `initialize` request SHALL declare the `textDocument.callHierarchy` client capability with `dynamicRegistration` set to `false`. Some language servers advertise `callHierarchyProvider` only when the client declares this capability, so the call hierarchy tools depend on it.
+
+#### Scenario: TypeScript initialization declares call hierarchy
+- **WHEN** a TypeScript language server is started
+- **THEN** the `initialize` request capabilities SHALL contain `textDocument.callHierarchy` with `dynamicRegistration: false`
+
+#### Scenario: Rust initialization declares call hierarchy
+- **WHEN** a Rust language server is started
+- **THEN** the `initialize` request capabilities SHALL contain `textDocument.callHierarchy` with `dynamicRegistration: false`
+
+#### Scenario: Call hierarchy tools work once the server advertises the provider
+- **WHEN** a TypeScript language server that gates `callHierarchyProvider` on this client capability (typescript-language-server 3.0.0 or later with TypeScript 3.8 or later) is initialized with these capabilities
+- **THEN** the system SHALL treat call hierarchy as supported and `incoming_calls` / `outgoing_calls` SHALL NOT return the "does not support call hierarchy" error
+
+### Requirement: Configurable index wait timeout
+When starting a language server, the system SHALL bound the index readiness wait by that language's configured `index_timeout_secs` (default 30 seconds). A value of `0` SHALL skip the wait. After a timeout or a skipped wait the system SHALL register the server and serve tool calls. If the server stops during the wait, the startup SHALL fail.
+
+#### Scenario: Default index timeout
+- **WHEN** a language server is started and its configuration does not set `index_timeout_secs`
+- **THEN** the system SHALL wait at most 30 seconds for the server to become ready
+
+#### Scenario: Configured index timeout
+- **WHEN** a Rust language server is started with `index_timeout_secs = 180`
+- **THEN** the system SHALL wait at most 180 seconds for the server to become ready
+
+#### Scenario: Index wait times out
+- **WHEN** the server does not become ready within its index timeout
+- **THEN** the system SHALL log a warning that names the language and the timeout, register the server, and execute the pending tool call
+
+#### Scenario: Server stops during the index wait
+- **WHEN** the language server stops (its notification stream ends) before it becomes ready and before the index timeout expires
+- **THEN** the system SHALL record a `startup_failed` event and return a startup error instead of registering the server
+
+#### Scenario: Index wait disabled
+- **WHEN** a language server is started with `index_timeout_secs = 0`
+- **THEN** the system SHALL register the server without waiting for readiness
+
+### Requirement: Rust server status opt-in
+The system SHALL declare the client capability `experimental.serverStatusNotification: true` in the `initialize` request sent to the Rust language server, so that rust-analyzer reports its indexing status. The TypeScript client capabilities SHALL NOT declare it.
+
+#### Scenario: Rust initialization requests server status
+- **WHEN** a Rust language server is started
+- **THEN** the `initialize` request SHALL include `capabilities.experimental.serverStatusNotification` set to `true`
+
+#### Scenario: TypeScript initialization does not request server status
+- **WHEN** a TypeScript language server is started
+- **THEN** the `initialize` request SHALL NOT include `capabilities.experimental.serverStatusNotification`
+
+### Requirement: TypeScript semantic-server-only mode
+The `initialize` request sent to a TypeScript language server SHALL include `initializationOptions` with `tsserver.useSyntaxServer` set to `"never"`, so that every request is answered by the semantic tsserver with whole-project knowledge, including requests that arrive while the project is still loading. The `initialize` request sent to a Rust language server SHALL NOT contain an `initializationOptions` field.
+
+#### Scenario: TypeScript initialization disables the syntax server
+- **WHEN** a TypeScript language server is started
+- **THEN** the `initialize` request SHALL contain `initializationOptions` equal to `{"tsserver": {"useSyntaxServer": "never"}}`
+
+#### Scenario: Rust initialization sends no initialization options
+- **WHEN** a Rust language server is started
+- **THEN** the `initialize` request SHALL NOT contain an `initializationOptions` field (neither an object nor `null`)
+
+#### Scenario: First TypeScript query resolves across files
+- **WHEN** the first tool call after a TypeScript language server starts is `goto_definition` on a call to a function imported from another file
+- **THEN** the response SHALL point to the function's definition in the other file, not to the import statement in the queried file

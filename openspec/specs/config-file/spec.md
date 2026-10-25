@@ -6,7 +6,7 @@ Loads `.symtrace.toml` from the working directory at startup to define projects 
 ## Requirements
 
 ### Requirement: Configuration loaded from .symtrace.toml
-The system SHALL read configuration from a `.symtrace.toml` file located in the current working directory (CWD) at startup. The `[server]` section SHALL accept arbitrary language keys including `"rust"` and `"typescript"`. Each key maps to a `ServerConfig` with `command` and optional `idle_timeout_secs`. Each `[[projects]]` entry SHALL accept an optional `env` field as an inline table mapping environment variable names to values. The optional `[logging]` section SHALL accept a `level` field with values: `off`, `error`, `warn`, `info`, `debug`, `trace`, or `tracing-subscriber::filter::Targets` filter syntax. The default value for `level` SHALL be `info`.
+The system SHALL read configuration from a `.symtrace.toml` file located in the current working directory (CWD) at startup. The `[server]` section SHALL accept arbitrary language keys including `"rust"` and `"typescript"`. Each key maps to a `ServerConfig` with `command`, optional `idle_timeout_secs` and optional `index_timeout_secs`. Each `[[projects]]` entry SHALL accept an optional `env` field as an inline table mapping environment variable names to values. The optional `[logging]` section SHALL accept a `level` field with values: `off`, `error`, `warn`, `info`, `debug`, `trace`, or `tracing-subscriber::filter::Targets` filter syntax. The default value for `level` SHALL be `info`.
 
 #### Scenario: Config file exists and is valid
 - **WHEN** `.symtrace.toml` exists in CWD and contains valid TOML
@@ -48,6 +48,14 @@ The system SHALL read configuration from a `.symtrace.toml` file located in the 
 - **WHEN** `.symtrace.toml` contains `[logging]` with no `level` field
 - **THEN** the system SHALL use `info` as the default log level
 
+#### Scenario: Server section with index timeout
+- **WHEN** `.symtrace.toml` contains `[server.rust]` with `command = "rust-analyzer"` and `index_timeout_secs = 180`
+- **THEN** the system SHALL parse `index_timeout_secs` as 180 for the Rust server config
+
+#### Scenario: Invalid index timeout value
+- **WHEN** `index_timeout_secs` is negative, not an integer, or greater than 86400 (one day)
+- **THEN** the system SHALL return a descriptive error and refuse to start
+
 ### Requirement: Project roots specified in config
 The `[[projects]]` section SHALL define a list of project root directories, each specified as a path relative to CWD.
 
@@ -60,7 +68,7 @@ The `[[projects]]` section SHALL define a list of project root directories, each
 - **THEN** the system SHALL use an implicit single project at CWD with the specified server configuration
 
 ### Requirement: Server configuration with global defaults
-The `[server.<language>]` section SHALL define language server command and idle timeout. These apply to all projects unless overridden.
+The `[server.<language>]` section SHALL define language server command, idle timeout and index wait timeout. These apply to all projects unless overridden. The index wait timeout (`index_timeout_secs`) SHALL default to 30 seconds when omitted.
 
 #### Scenario: Server command specified
 - **WHEN** the config contains `[server.rust] command = "rust-analyzer"`
@@ -68,7 +76,15 @@ The `[server.<language>]` section SHALL define language server command and idle 
 
 #### Scenario: Server section absent
 - **WHEN** the config has no `[server]` section
-- **THEN** the system SHALL use hardcoded defaults (rust-analyzer with 600s idle timeout)
+- **THEN** the system SHALL use hardcoded defaults (rust-analyzer with 600s idle timeout and 30s index timeout)
+
+#### Scenario: Index timeout specified
+- **WHEN** the config contains `[server.rust]` with `index_timeout_secs = 180`
+- **THEN** all Rust projects SHALL wait up to 180 seconds for rust-analyzer to become ready
+
+#### Scenario: Index timeout omitted
+- **WHEN** the config contains `[server.rust]` with a `command` but no `index_timeout_secs`
+- **THEN** all Rust projects SHALL wait up to 30 seconds for rust-analyzer to become ready
 
 ### Requirement: Project root paths are canonicalized
 All project root paths from the config SHALL be canonicalized (resolved to absolute paths with symlinks followed) before being used for routing.

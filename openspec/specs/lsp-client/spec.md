@@ -25,19 +25,31 @@ The system SHALL provide an `LspClient` that manages the full LSP server lifecyc
 - **THEN** it SHALL implement all `LspClientApi` trait methods, delegating to its internal `LspTransport`
 
 ### Requirement: Index readiness wait
-After initialization, the system SHALL wait for the language server to finish indexing before accepting queries. It SHALL poll `workspace/symbol` with an empty query every 500 ms (each request bounded to 5 seconds) until a non-empty result is returned, with an overall timeout of 30 seconds. If the server does not advertise `workspaceSymbolProvider`, the wait SHALL be skipped.
+After initialization, the system SHALL wait for the language server to become ready before accepting queries, bounded by the language's configured index timeout. If the server has reported its status, readiness SHALL be the server reporting `quiescent: true`. Otherwise the system SHALL poll `workspace/symbol` with an empty query every 500 ms (each request bounded to 5 seconds) until a non-empty result, ending the wait early after 5 consecutive empty or failed polls.
 
 #### Scenario: Server becomes ready within timeout
-- **WHEN** the language server returns a non-empty `workspace/symbol` result within the timeout period
+- **WHEN** a server that has not reported its status returns a non-empty `workspace/symbol` result within the timeout period
 - **THEN** the system SHALL proceed to accept queries
 
 #### Scenario: Server fails to become ready
-- **WHEN** the language server does not return a non-empty `workspace/symbol` result within the timeout period
+- **WHEN** a server that reports its status does not report `quiescent: true` within the timeout period, or a server that does not report its status neither returns a non-empty `workspace/symbol` result nor reaches 5 consecutive empty or failed polls within the timeout period
 - **THEN** the system SHALL log a warning and register the server anyway so that queries can proceed
 
 #### Scenario: Server has no workspace symbol support
-- **WHEN** the server capabilities do not include `workspaceSymbolProvider`
+- **WHEN** the server capabilities do not include `workspaceSymbolProvider` and the server has not reported its status
 - **THEN** the system SHALL skip the readiness wait and accept queries immediately
+
+#### Scenario: Status-reporting server becomes quiescent
+- **WHEN** the server has reported `quiescent: false` and later reports `quiescent: true` within the timeout period
+- **THEN** the system SHALL end the wait at that notification and proceed to accept queries, regardless of what `workspace/symbol` returns
+
+#### Scenario: Status arrives while polling
+- **WHEN** the system is polling `workspace/symbol` because no status had been reported yet, and the server then reports its status
+- **THEN** the system SHALL stop polling and wait for `quiescent: true` for the rest of the timeout period, and the 5-poll early exit SHALL NOT end the wait
+
+#### Scenario: Poll early exit is logged
+- **WHEN** a server that has not reported its status returns 5 consecutive empty or failed `workspace/symbol` polls
+- **THEN** the system SHALL end the wait, log that it ended after empty polls, and proceed to accept queries
 
 ### Requirement: File management via didOpen/didChange/didClose
 The system SHALL send `textDocument/didOpen` before querying a file, `textDocument/didChange` when the file has been modified since last open (detected by mtime), and `textDocument/didClose` when the file is no longer needed. These methods SHALL be part of the `LspClientApi` trait so that `FileManager` can accept any implementation (including mocks).
@@ -151,3 +163,41 @@ The system SHALL provide a `rename` method on `LspClient` that sends `textDocume
 #### Scenario: Rename capability check
 - **WHEN** `rename_provider` is `None` in server capabilities
 - **THEN** the system SHALL return a `ClientError::Protocol` indicating rename is not supported
+
+### Requirement: Server status tracking
+The system SHALL keep the most recent `experimental/serverStatus` notification received from a language server for the life of that server. The server SHALL be treated as indexing exactly while the most recent notification reports `quiescent: false`. A server that has never sent the notification SHALL be treated as not reporting status, never as indexing. The `health` and `message` fields SHALL NOT affect readiness.
+
+#### Scenario: No status notification received
+- **WHEN** the language server has not sent any `experimental/serverStatus` notification
+- **THEN** the system SHALL treat the server as not reporting status and not indexing
+
+#### Scenario: Server reports it is not quiescent
+- **WHEN** the most recent `experimental/serverStatus` notification has `quiescent: false`
+- **THEN** the system SHALL treat the server as indexing
+
+#### Scenario: Server reports it is quiescent
+- **WHEN** the most recent `experimental/serverStatus` notification has `quiescent: true`
+- **THEN** the system SHALL treat the server as ready
+
+#### Scenario: Server leaves quiescence after startup
+- **WHEN** a server that reported `quiescent: true` later reports `quiescent: false` (for example during a workspace reload)
+- **THEN** the system SHALL treat the server as indexing again until it reports `quiescent: true`
+
+#### Scenario: Quiescent with degraded health
+- **WHEN** a notification reports `quiescent: true` with `health` set to `warning` or `error`
+- **THEN** the system SHALL treat the server as ready and log a warning that includes the reported `message`
+
+#### Scenario: Malformed status notification
+- **WHEN** an `experimental/serverStatus` notification lacks a boolean `quiescent` field
+- **THEN** the system SHALL ignore it and keep the previously recorded status
+
+### Requirement: Optional initialization options
+`LspClient::start` SHALL accept optional initialization options from its caller. When options are provided, the `initialize` request SHALL carry them unchanged as `initializationOptions`. When no options are provided, the `initialize` request SHALL omit the `initializationOptions` field entirely rather than sending `null`.
+
+#### Scenario: Options provided
+- **WHEN** `LspClient::start` is called with initialization options
+- **THEN** the `initialize` request SHALL include an `initializationOptions` field equal to the provided value
+
+#### Scenario: No options provided
+- **WHEN** `LspClient::start` is called without initialization options
+- **THEN** the `initialize` request SHALL NOT include an `initializationOptions` field

@@ -51,3 +51,29 @@ Running `symtrace-mcp` with no subcommand SHALL start the MCP server (current be
 #### Scenario: Run with no arguments
 - **WHEN** the user runs `symtrace-mcp` with no arguments
 - **THEN** the MCP server starts normally (identical to current behavior)
+
+### Requirement: Uptime reflects recorded stop durations
+The "total uptime" figure in the "Language Servers" section SHALL be the sum of `duration_ms` over that language's `stopped` events in the reporting window. A server that is still running SHALL contribute nothing until it stops; `stopped` events without a duration SHALL contribute zero. Each `stopped` duration SHALL be measured from the moment the language server process was spawned, so uptime includes the startup/index wait that `avg startup` also reports.
+
+#### Scenario: Uptime summed from stopped events
+- **WHEN** the window contains two `stopped` events for `rust` with durations of 1 hour and 30 minutes
+- **THEN** the `rust` line reports `uptime 1h 30m total`
+
+#### Scenario: Server still running
+- **WHEN** the window contains a `started` event for `rust` and no `stopped` event
+- **THEN** the `rust` line reports `uptime 0s total`
+
+### Requirement: Version flag
+The binary SHALL accept `--version` and `-V`. Either flag SHALL print `symtrace-mcp <crate version>` followed by a newline to stdout and exit with code 0, without starting the MCP server, opening the stats database, or touching any file.
+
+#### Scenario: Long version flag
+- **WHEN** the user runs `symtrace-mcp --version` with a binary built from crate version 0.6.1
+- **THEN** stdout is `symtrace-mcp 0.6.1` and the exit code is 0
+
+#### Scenario: Short version flag
+- **WHEN** the user runs `symtrace-mcp -V`
+- **THEN** the output is identical to `symtrace-mcp --version`
+
+#### Scenario: Version flag does not start the server
+- **WHEN** the user runs `symtrace-mcp --version`
+- **THEN** the process exits immediately without reading stdin or spawning a language server
