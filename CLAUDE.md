@@ -71,7 +71,7 @@ Feature development follows an OpenSpec workflow. Specs live in `openspec/specs/
 
 ## CHANGELOG
 
-When bumping the version in `Cargo.toml`, update `CHANGELOG.md` with a new version section following the [Keep a Changelog](https://keepachangelog.com/) format. Categorize entries as Added/Changed/Fixed/Removed. Add a comparison link at the bottom.
+When bumping the version in `Cargo.toml`, update `CHANGELOG.md` with a new version section following the [Keep a Changelog](https://keepachangelog.com/) format. Categorize entries as Added/Changed/Fixed/Removed. Add a comparison link at the bottom. Also update the `--tag v<version>` in the `cargo install` command in `README.md` and `README.ja.md`.
 
 ## PR Review Workflow
 

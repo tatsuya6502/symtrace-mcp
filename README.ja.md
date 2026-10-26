@@ -189,7 +189,7 @@ symtrace-mcp setup
 | hook | `~/.claude/settings.json` | `Bash`と`Grep`のマッチャーに対する`PreToolUse`エントリー。`symtrace-mcp hook`を実行します |
 | mcp | `~/.claude.json` | `mcpServers.symtrace-mcp`エントリー |
 
-これが必要な理由：Claude Codeのオートモードでは、モデルはBashを優先して使います。そのため「Xを呼んでいるのはどこか」を調べるときは`sb callers`や`grep`を使い、`sb`を名指しした指示がない限り、MCPツールを選びません。マーカーブロックがこれを直し、フックがそれを後押しします。
+これが必要な理由：Claude Codeのauto modeでは、モデルはBashを優先して使います。そのため「Xを呼んでいるのはどこか」を調べるときは`sb callers`や`grep`を使い、`sb`を名指しした指示がない限り、MCPツールを選びません。マーカーブロックがこれを直し、フックがそれを後押しします。
 
 フックは`Bash`と`Grep`の呼び出しを1つずつ調べます。呼び出しが`sb callers|callees|implements|impact|trace`、ソースコードを対象にした識別子だけの`grep`/`rg`、識別子だけを渡した`Grep`ツールの呼び出しのどれかであれば、呼び出しはそのまま実行させ、対応するsymtrace-mcpツールの名前を示すリマインダーを添えます。呼び出しをブロックすることはありません。どのディレクトリをソースコードとみなすかは、`SYMTRACE_HOOK_SRC_DIRS="src|crates"`のように設定して変えられます。
 
@@ -227,7 +227,7 @@ Claude Codeで単一のRustプロジェクトだけを扱うなら、組み込�
 | マルチ言語 | Python対応 | 計画中 |
 | マルチ言語 | Kotlin対応 | 計画中 |
 | 高度な機能 | `hover`、`diagnostics`、`rename` | 完了 |
-| インストーラとアップグレード | `curl \| sh`インストーラ、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
+| インストーラーとアップグレード | `curl \| sh`インストーラー、Homebrewタップ、`symtrace-mcp upgrade` | 計画中 |
 | 診断コマンド | `symtrace-mcp doctor` — 環境チェックと前提条件の検証 | 計画中 |
 | 言語別統計 | 言語ごとの使用統計、スキーママイグレーション | 計画中 |
 
