@@ -88,7 +88,7 @@ On timeout the server is used anyway. While rust-analyzer is still indexing, an 
 
 ### Logs
 
-Each run writes a JSONL log file to `.symtrace/logs/` (named `symtrace-mcp.<timestamp>.<pid>.log`). Files older than 7 days are deleted at startup. Two environment variables adjust logging without touching the config file:
+By default each run writes a JSONL log file to `.symtrace/logs/` (named `symtrace-mcp.<timestamp>.<pid>.log`); with the level set to `off`, no file is created. Files older than 7 days are deleted at startup. Two environment variables adjust logging without touching the config file:
 
 - `SYMTRACE_LOG`: log level; overrides `[logging] level`. `SYMTRACE_LOG=off` disables file logging
 - `SYMTRACE_LOG_DIR`: log directory, instead of `.symtrace/logs/`
@@ -180,7 +180,7 @@ Options:
 - `--status`: show `installed v<version>` / `outdated v<version>` / `modified` / `absent` per item. The hook and MCP entries record no version, so they show the running binary's version when their command is the bare `symtrace-mcp` or a path to the running binary, and a bare `installed` when it points at another install
 - `--uninstall`: remove only what `setup` added; other content in those files is preserved
 
-`setup` installs four things in your per-user Claude Code files:
+By default `setup` installs four things in your per-user Claude Code files (`--local` targets the project files instead):
 
 | Item | File | What it does |
 |------|------|--------------|
@@ -191,7 +191,7 @@ Options:
 
 Why: in Claude Code auto mode the model prefers Bash, so for "who calls X" it reaches for `sb callers` or `grep` and never picks an MCP tool unless an instruction names `sb` explicitly. The block fixes that; the hook reinforces it.
 
-The hook reads each `Bash`/`Grep` call and, when it is `sb callers|callees|implements|impact|trace`, a bare-identifier `grep`/`rg` over source code, or a `Grep` tool call with a bare identifier, lets the call run and attaches a reminder naming the matching symtrace-mcp tool. It never blocks a call. Set `SYMTRACE_HOOK_SRC_DIRS="src|crates"` to change which directories count as source code.
+The hook reads each `Bash`/`Grep` call and, when it is `sb callers|callees|implements|impact|trace`, a `grep` or `rg` command over source code whose pattern is a bare identifier, or a `Grep` tool call with a bare identifier, lets the call run and attaches a reminder naming the matching symtrace-mcp tool. It never blocks a call. Set `SYMTRACE_HOOK_SRC_DIRS="src|crates"` to change which directories count as source code.
 
 Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code: run the `cargo install` command above before `setup`. If `PATH` resolves to a different binary than the one running `setup` (for example an older install while you run `target/debug/symtrace-mcp`), `setup` prints a warning; an old binary without the `hook` subcommand would make Claude Code block every `Bash` and `Grep` call.
 

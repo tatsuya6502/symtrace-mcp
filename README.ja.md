@@ -88,7 +88,7 @@ env = { DATABASE_URL = "postgres://localhost/mydb" }
 
 ### ログ
 
-実行のたびに、JSONL形式のログファイルが`.symtrace/logs/`に書き出されます（ファイル名は`symtrace-mcp.<timestamp>.<pid>.log`）。7日より古いファイルは起動時に削除されます。次の2つの環境変数を使うと、設定ファイルを編集せずにログの出し方を変えられます。
+デフォルトでは、実行のたびにJSONL形式のログファイルが`.symtrace/logs/`に書き出されます（ファイル名は`symtrace-mcp.<timestamp>.<pid>.log`）。ログレベルを`off`にするとファイルは作られません。7日より古いファイルは起動時に削除されます。次の2つの環境変数を使うと、設定ファイルを編集せずにログの出し方を変えられます。
 
 - `SYMTRACE_LOG`：ログレベル。`[logging] level`より優先されます。`SYMTRACE_LOG=off`にするとファイルへのログ出力を止めます
 - `SYMTRACE_LOG_DIR`：`.symtrace/logs/`の代わりに使うログディレクトリ
@@ -180,7 +180,7 @@ symtrace-mcp setup
 - `--status`：項目ごとに`installed v<version>` / `outdated v<version>` / `modified` / `absent`を表示します。フックとMCPのエントリーはバージョンを記録しません。そのため、コマンドが素の`symtrace-mcp`か実行中のバイナリへのパスであれば、実行中のバイナリのバージョンを表示し、別の場所にインストールされたものを指していれば、バージョンなしの`installed`を表示します
 - `--uninstall`：`setup`が追加したものだけを削除します。それらのファイルにあるほかの内容は残ります
 
-`setup`は、ユーザー単位のClaude Codeのファイルに次の4つをインストールします。
+デフォルトでは、`setup`はユーザー単位のClaude Codeのファイルに次の4つをインストールします（`--local`を付けるとプロジェクトのファイルが対象になります）。
 
 | 項目 | ファイル | 内容 |
 |------|------|--------------|
@@ -191,7 +191,7 @@ symtrace-mcp setup
 
 これが必要な理由：Claude Codeのauto modeでは、モデルはBashを優先して使います。そのため「Xを呼んでいるのはどこか」を調べるときは`sb callers`や`grep`を使い、`sb`を名指しした指示がない限り、MCPツールを選びません。マーカーブロックがこれを直し、フックがそれを後押しします。
 
-フックは`Bash`と`Grep`の呼び出しを1つずつ調べます。呼び出しが`sb callers|callees|implements|impact|trace`、ソースコードを対象にした識別子だけの`grep`/`rg`、識別子だけを渡した`Grep`ツールの呼び出しのどれかであれば、呼び出しはそのまま実行させ、対応するsymtrace-mcpツールの名前を示すリマインダーを添えます。呼び出しをブロックすることはありません。どのディレクトリをソースコードとみなすかは、`SYMTRACE_HOOK_SRC_DIRS="src|crates"`のように設定して変えられます。
+フックは`Bash`と`Grep`の呼び出しを1つずつ調べます。呼び出しが`sb callers|callees|implements|impact|trace`、ソースコードを対象にしたパターンが識別子だけの`grep`または`rg`コマンド、識別子だけを渡した`Grep`ツールの呼び出しのどれかであれば、呼び出しはそのまま実行させ、対応するsymtrace-mcpツールの名前を示すリマインダーを添えます。呼び出しをブロックすることはありません。どのディレクトリをソースコードとみなすかは、`SYMTRACE_HOOK_SRC_DIRS="src|crates"`のように設定して変えられます。
 
 symtrace-mcpをアップグレードしたあとに`setup`を再実行すると、ブロックが新しいバージョンに更新されます。フックとMCPのエントリーはコマンド名`symtrace-mcp`だけを書くので、Claude Codeから見える`PATH`上にバイナリが必要です。`setup`の前に、上の`cargo install`コマンドを実行してください。`PATH`で見つかるバイナリが`setup`を実行しているものと違う場合（たとえば`target/debug/symtrace-mcp`を実行していて、`PATH`上には古いものがある場合）は、`setup`が警告を出します。`hook`サブコマンドのない古いバイナリが使われると、Claude Codeは`Bash`と`Grep`の呼び出しをすべてブロックしてしまいます。
 
