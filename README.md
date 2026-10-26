@@ -7,29 +7,30 @@
 
 **Lazy startup** and **automatic idle shutdown** ensure that heavy language server processes only consume resources when the AI agent specifically requests deep code analysis.
 
-It is designed to complement, not replace, existing lightweight code analysis tools like `ast-outline`.
+It is designed to complement, not replace, existing lightweight code analysis tools like [`ast-bro`][ast-bro].
 
-## When to Use symtrace-mcp vs ast-outline
+## When to Use symtrace-mcp vs ast-bro
 
-[`ast-outline`][ast-outline] covers most code exploration needs and should be the first tool you reach for. `symtrace-mcp` handles the operations that require a live language server:
+[`ast-bro`][ast-bro] (`sb`) covers most code exploration needs and should be the first tool you reach for. `symtrace-mcp` handles the operations that require a live language server:
 
 | Task | Tool |
 |------|------|
-| Structure overview, signatures, symbol bodies | `ast-outline outline` / `show` |
-| Implementation search (tree-sitter) | `ast-outline implements` |
-| File-level dependency graph | `ast-outline deps` / `reverse-deps` |
-| Semantic and BM25 search | `ast-outline search` |
+| Structure overview, signatures, symbol bodies | `sb map` / `digest` / `show` |
+| Implementation search (tree-sitter) | `sb implements` |
+| File-level dependency graph | `sb deps` / `reverse-deps` |
+| Call graph (tree-sitter heuristic, no type resolution) | `sb callers` / `callees` / `impact` |
+| Semantic and BM25 search | `sb search` |
 | **Symbol-level reference search** | **`symtrace-mcp find_references`** |
 | **Rust trait implementation resolution** | **`symtrace-mcp find_implementations`** |
 | **Jump to definition (type-resolved)** | **`symtrace-mcp goto_definition`** |
-| **Call hierarchy** | **`symtrace-mcp incoming_calls`** / **`outgoing_calls`** |
+| **Call hierarchy (type-resolved)** | **`symtrace-mcp incoming_calls`** / **`outgoing_calls`** |
 | **Type information / hover** | **`symtrace-mcp hover`** |
 | **Pull diagnostics** | **`symtrace-mcp diagnostics`** |
 | **Rename preview** | **`symtrace-mcp rename`** |
 
 The first tool call to `symtrace-mcp` starts the language server in the background. Subsequent calls reuse the running server. The server shuts down automatically after 10 minutes of inactivity.
 
-[ast-outline]: https://github.com/aeroxy/ast-outline
+[ast-bro]: https://github.com/aeroxy/ast-bro
 
 ## Supported Languages
 
@@ -41,19 +42,23 @@ symtrace-mcp communicates with language servers via the Language Server Protocol
 | TypeScript / JavaScript | [typescript-language-server](https://github.com/typescript-language-server/typescript-language-server) | Supported |
 | Python | [pyright](https://github.com/microsoft/pyright) | Planned |
 
-Language support is configured per-project. The goal is for adding a new language to require only a language server entry, with no code changes.
+Each language server is configured in its own `[server.<lang>]` section of `.symtrace.toml` (see [Configuration](#configuration)). The goal is for adding a new language to require only a language server entry, with no code changes.
 
-## Multi-Project Support
+## Configuration
 
-symtrace-mcp can manage multiple independent projects in a single repository, each with its own language server instance. Create a `.symtrace.toml` file in the directory where Claude Code is launched:
+symtrace-mcp reads `.symtrace.toml` from the directory where the AI agent is launched. The file is optional: without it the server runs in single-project mode with the current directory as the project root and the default Rust and TypeScript server settings.
 
 ```toml
 [server.rust]
 # command defaults to rust-analyzer when omitted
-index_timeout_secs = 120  # optional; raise for large workspaces
+index_timeout_secs = 120  # raise for large workspaces
 
 [server.typescript]
 command = "typescript-language-server"
+idle_timeout_secs = 300
+
+[logging]
+level = "debug"
 
 [[projects]]
 root = "project-a"
@@ -63,14 +68,30 @@ root = "project-b"
 env = { DATABASE_URL = "postgres://localhost/mydb" }
 ```
 
-- `[[projects]]` — List of project root directories (relative to the config file). Each gets its own language server.
-- `env` — Optional. Environment variables to set for language servers spawned for this project (augments the parent process environment).
-- `[server.rust]` — Global language server configuration. Optional; defaults to `rust-analyzer` with a 600s idle timeout and a 30s index timeout. `command` is optional inside the section too; when omitted, `rust-analyzer` is used.
-- `[server.typescript]` — TypeScript language server configuration. Optional; defaults to `typescript-language-server --stdio` with a 600s idle timeout and a 30s index timeout. `command` is optional inside the section too; when omitted, `typescript-language-server --stdio` is used. The TypeScript options assume typescript-language-server: the `tsserver.useSyntaxServer = "never"` initialization option is ignored by other servers such as vtsls or deno, which then answer the first query from a partially loaded project.
-- `index_timeout_secs` — Optional, in any `[server.<lang>]` section, and can be set on its own without `command`. How long the first tool call waits for the language server to finish loading the workspace (default 30; `0` skips the wait; at most 86400). With `0` the first queries may run before the language server has reported its indexing status, so their results can be incomplete, because the "still indexing" error relies on that status. On timeout the server is used anyway, and an empty answer while rust-analyzer is still indexing comes back as a "language server is still indexing" error to retry. Raise it for large Rust workspaces that take longer than 30 seconds to load.
-- If `.symtrace.toml` is absent, the server runs in single-project mode using the current directory as the project root.
+| Key | Default | Description |
+|-----|---------|-------------|
+| `[server.<lang>]` | Rust and TypeScript defaults | Per-language server settings. `<lang>` is `rust` or `typescript`. Every key inside is optional, so a section may contain just one of them |
+| `command` | `rust-analyzer` / `typescript-language-server --stdio` | Language server command. The TypeScript defaults assume typescript-language-server: other servers such as vtsls or deno ignore the `tsserver.useSyntaxServer = "never"` initialization option and answer the first query from a partially loaded project |
+| `idle_timeout_secs` | `600` | Shut the language server down after this many seconds without a tool call. The next call starts it again |
+| `index_timeout_secs` | `30` | How long the first tool call waits for the language server to finish loading the workspace. `0` skips the wait; at most `86400` |
+| `[logging] level` | `info` | Log level: `off`, `error`, `warn`, `info`, `debug`, `trace`, or a [`tracing-subscriber` Targets filter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.Targets.html) such as `symtrace_mcp::lsp=debug` |
+| `[[projects]]` `root` | current directory | Project root, relative to the config file. Each project gets its own language server instance per language |
+| `[[projects]]` `env` | none | Environment variables for the language servers of this project, added to the parent process environment |
 
-Tool calls are automatically routed to the correct project's language server based on the file path (longest-prefix match).
+### Multi-project support
+
+With several `[[projects]]` entries, symtrace-mcp manages independent projects in one repository, each with its own language server instance. Tool calls are routed to the right project by file path (longest-prefix match).
+
+### Index timeout
+
+On timeout the server is used anyway. While rust-analyzer is still indexing, an empty answer comes back as a "language server is still indexing" error so the agent can retry. With `index_timeout_secs = 0` the first queries may run before the language server has reported its indexing status, so their results can be incomplete, because that error relies on the status.
+
+### Logs
+
+By default each run writes a JSONL log file to `.symtrace/logs/` (named `symtrace-mcp.<timestamp>.<pid>.log`); with the level set to `off`, no file is created. Files older than 7 days are deleted at startup. Two environment variables adjust logging without touching the config file:
+
+- `SYMTRACE_LOG`: log level; overrides `[logging] level`. `SYMTRACE_LOG=off` disables file logging
+- `SYMTRACE_LOG_DIR`: log directory, instead of `.symtrace/logs/`
 
 ## Usage Statistics
 
@@ -122,38 +143,33 @@ rustup component add rust-src
 
 # TypeScript / JavaScript
 npm install -g typescript-language-server typescript
+
+# Claude Code: disable the built-in rust-analyzer plugin so that
+# two rust-analyzer instances do not run side by side
+claude plugin disable rust-analyzer-lsp@claude-plugins-official
 ```
 
-Clone the repository and install the server:
+The last step can also be done by adding `"rust-analyzer-lsp@claude-plugins-official": false` under `enabledPlugins` in `~/.claude/settings.json`.
+
+### Install the server
+
+Install the latest release with Cargo straight from GitHub:
 
 ```bash
-git clone https://github.com/tatsuya6502/symtrace-mcp.git
-cd symtrace-mcp
-cargo install --path .
+cargo install --locked --git https://github.com/tatsuya6502/symtrace-mcp.git --tag v0.7.0
 ```
 
-Check which version is installed with `symtrace-mcp --version` (or `-V`).
+Omit `--tag` to build the `main` branch instead. Check which version is installed with `symtrace-mcp --version` (or `-V`).
 
-Add `symtrace-mcp` to your AI agent's tool configuration, specifying the path to the executable and any necessary arguments.
+For AI agents other than Claude Code, add `symtrace-mcp` to the agent's MCP server configuration as a stdio server with the `symtrace-mcp` command and no arguments.
 
 ### Claude Code integration
 
-Run `setup` once with no Claude Code session open. It installs four things in your per-user Claude Code files:
+Run `setup` once with no Claude Code session open:
 
 ```bash
 symtrace-mcp setup
 ```
-
-| Item | File | What it does |
-|------|------|--------------|
-| prompt | `~/.claude/CLAUDE.md` | A marker block (`<!-- symtrace-mcp:begin v=<version> -->` … `<!-- symtrace-mcp:end -->`) telling the model to use symtrace-mcp tools before `sb`/`grep` for semantic questions (callers, implementations, definitions, references, types) |
-| explore | `~/.claude/agents/Explore.md` | The same block, because the built-in Explore subagent never sees `CLAUDE.md`. Created with the built-in Explore frontmatter plus `disallowedTools: Write, Edit, NotebookEdit` when absent; if the file exists (for example ast-bro's copy), only the block is added, and `setup` warns when that file's frontmatter has no `tools:`/`disallowedTools:` line, because a user agent named Explore replaces the built-in read-only one and would inherit every tool |
-| hook | `~/.claude/settings.json` | `PreToolUse` entries for the `Bash` and `Grep` matchers running `symtrace-mcp hook` |
-| mcp | `~/.claude.json` | The `mcpServers.symtrace-mcp` entry |
-
-Why: in Claude Code auto mode the model prefers Bash, so for "who calls X" it reaches for `sb callers` or `grep` and never picks an MCP tool unless an instruction names `sb` explicitly. The block fixes that; the hook reinforces it.
-
-The hook reads each `Bash`/`Grep` call and, when it is `sb callers|callees|implements|impact|trace`, a bare-identifier `grep`/`rg` over source code, or a `Grep` tool call with a bare identifier, lets the call run and attaches a reminder naming the matching symtrace-mcp tool. It never blocks a call. Set `SYMTRACE_HOOK_SRC_DIRS="src|crates"` to change which directories count as source code.
 
 Options:
 
@@ -164,32 +180,20 @@ Options:
 - `--status`: show `installed v<version>` / `outdated v<version>` / `modified` / `absent` per item. The hook and MCP entries record no version, so they show the running binary's version when their command is the bare `symtrace-mcp` or a path to the running binary, and a bare `installed` when it points at another install
 - `--uninstall`: remove only what `setup` added; other content in those files is preserved
 
-Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code: run `cargo install --path .` before `setup`. If `PATH` resolves to a different binary than the one running `setup` (for example an older install while you run `target/debug/symtrace-mcp`), `setup` prints a warning; an old binary without the `hook` subcommand would make Claude Code block every `Bash` and `Grep` call.
+By default `setup` installs four things in your per-user Claude Code files (`--local` targets the project files instead):
 
-<details>
-  <summary>Manual Claude Code setup (without <code>setup</code>)</summary>
+| Item | File | What it does |
+|------|------|--------------|
+| prompt | `~/.claude/CLAUDE.md` | A marker block (`<!-- symtrace-mcp:begin v=<version> -->` … `<!-- symtrace-mcp:end -->`) telling the model to use symtrace-mcp tools before `sb`/`grep` for semantic questions (callers, implementations, definitions, references, types) |
+| explore | `~/.claude/agents/Explore.md` | The same block, because the built-in Explore subagent never sees `CLAUDE.md`. Created with the built-in Explore frontmatter plus `disallowedTools: Write, Edit, NotebookEdit` when absent; if the file exists (for example ast-bro's copy), only the block is added, and `setup` warns when that file's frontmatter has no `tools:`/`disallowedTools:` line, because a user agent named Explore replaces the built-in read-only one and would inherit every tool |
+| hook | `~/.claude/settings.json` | `PreToolUse` entries for the `Bash` and `Grep` matchers running `symtrace-mcp hook` |
+| mcp | `~/.claude.json` | The `mcpServers.symtrace-mcp` entry |
 
-```bash
-claude mcp add --scope user symtrace-mcp -- symtrace-mcp
-```
+Why: in Claude Code auto mode the model prefers Bash, so for "who calls X" it reaches for `sb callers` or `grep` and never picks an MCP tool unless an instruction names `sb` explicitly. The block fixes that; the hook reinforces it.
 
-</details>
+The hook reads each `Bash`/`Grep` call and, when it is `sb callers|callees|implements|impact|trace`, a `grep` or `rg` command over source code whose pattern is a bare identifier, or a `Grep` tool call with a bare identifier, lets the call run and attaches a reminder naming the matching symtrace-mcp tool. It never blocks a call. Set `SYMTRACE_HOOK_SRC_DIRS="src|crates"` to change which directories count as source code.
 
-Disable the built-in `rust-analyzer-lsp` plugin to avoid running duplicate language server instances:
-
-```bash
-claude plugin disable rust-analyzer-lsp@claude-plugins-official
-```
-
-Or add the following to `~/.claude/settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "rust-analyzer-lsp@claude-plugins-official": false
-  }
-}
-```
+Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code: run the `cargo install` command above before `setup`. If `PATH` resolves to a different binary than the one running `setup` (for example an older install while you run `target/debug/symtrace-mcp`), `setup` prints a warning; an old binary without the `hook` subcommand would make Claude Code block every `Bash` and `Grep` call.
 
 ### Why symtrace-mcp over built-in LSP plugins? *(as of May 2026)*
 
