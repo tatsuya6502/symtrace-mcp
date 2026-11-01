@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The prompt snippet that `symtrace-mcp setup` installs into `~/.claude/CLAUDE.md` and `~/.claude/agents/Explore.md` now leads with the positive instruction and drops the "FIRST" / "not acceptable" wording. The rule itself (symtrace-mcp tools for semantic questions, `sb` for structural overview) is unchanged (#46).
+
 ## [0.7.0] — 2026-10-25
 
 ### Added
