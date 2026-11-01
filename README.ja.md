@@ -178,7 +178,7 @@ symtrace-mcp setup
 - `--skip-prompt` / `--skip-explore` / `--skip-hook` / `--skip-mcp`：その項目には手を付けません
 - `--force`：手で編集したブロックやMCPエントリーを置き換えます（指定しないと、`setup`は置き換えを拒否し、0以外の終了コードで終了します）
 - `--status`：項目ごとに`installed v<version>` / `outdated v<version>` / `modified` / `absent`を表示します。フックとMCPのエントリーはバージョンを記録しません。そのため、コマンドが素の`symtrace-mcp`か実行中のバイナリへのパスであれば、実行中のバイナリのバージョンを表示し、別の場所にインストールされたものを指していれば、バージョンなしの`installed`を表示します
-- `--uninstall`：`setup`が追加したものだけを削除します。それらのファイルにあるほかの内容は残ります
+- `--uninstall`：`setup`が追加したものだけを削除します。それらのファイルにあるほかの内容は残ります。`setup`が作成した`Explore.md`は削除されますが、`setup`が作成した`CLAUDE.md`やJSONファイルは空のまま残ります
 
 デフォルトでは、`setup`はユーザー単位のClaude Codeのファイルに次の4つをインストールします（`--local`を付けるとプロジェクトのファイルが対象になります）。
 
@@ -191,9 +191,18 @@ symtrace-mcp setup
 
 これが必要な理由：Claude Codeのauto modeでは、モデルはBashを優先して使います。そのため「Xを呼んでいるのはどこか」を調べるときは`sb callers`や`grep`を使い、`sb`を名指しした指示がない限り、MCPツールを選びません。マーカーブロックがこれを直し、フックがそれを後押しします。
 
-フックは`Bash`と`Grep`の呼び出しを1つずつ調べます。呼び出しが`sb callers|callees|implements|impact|trace`、ソースコードを対象にしたパターンが識別子だけの`grep`または`rg`コマンド、識別子だけを渡した`Grep`ツールの呼び出しのどれかであれば、呼び出しはそのまま実行させ、対応するsymtrace-mcpツールの名前を示すリマインダーを添えます。呼び出しをブロックすることはありません。どのディレクトリをソースコードとみなすかは、`SYMTRACE_HOOK_SRC_DIRS="src|crates"`のように設定して変えられます。
+フックは`Bash`と`Grep`の呼び出しを1つずつ調べます。呼び出しが`sb callers|callees|implements|impact|trace`、ソースコードを対象にしたパターンが識別子だけの`grep`または`rg`コマンド、識別子だけを渡した`Grep`ツールの呼び出しのどれかであれば、呼び出しはそのまま実行させ、対応するsymtrace-mcpツールの名前を示すリマインダーを添えます。呼び出しをブロックすることはありません。どのディレクトリをソースコードとみなすかは、`SYMTRACE_HOOK_SRC_DIRS="src|crates"`のように設定して変えられます。フラグに値を取るラッパーの後ろにある`grep`（`git -C <dir> grep`、`sudo -u <user> grep`、`nice -n <N> grep`など）はフックには見えないため、リマインダーなしで実行されます。
 
 symtrace-mcpをアップグレードしたあとに`setup`を再実行すると、ブロックが新しいバージョンに更新されます。フックとMCPのエントリーはコマンド名`symtrace-mcp`だけを書くので、Claude Codeから見える`PATH`上にバイナリが必要です。`setup`の前に、上の`cargo install`コマンドを実行してください。`PATH`で見つかるバイナリが`setup`を実行しているものと違う場合（たとえば`target/debug/symtrace-mcp`を実行していて、`PATH`上には古いものがある場合）は、`setup`が警告を出します。`hook`サブコマンドのない古いバイナリが使われると、Claude Codeは`Bash`と`Grep`の呼び出しをすべてブロックしてしまいます。
+
+### トラブルシューティング：モデルが`sb`や`grep`を使い続ける
+
+symtrace-mcpをインストールしたのに、Claude Codeが「Xを呼んでいるのはどこか」を`sb callers`や`grep`で答えてしまうときは、次の順番で確認してください。
+
+1. **MCPサーバーが接続されている。** Claude Codeで`/mcp`を実行し、`symtrace-mcp`が接続済みとして表示されることを確認します。同じディレクトリーでsymtrace-mcpのプロセスが2つ動いていても問題はありません。2つ目のプロセスは統計データベースを開けないため、使用統計を無効にして動きます（`.symtrace/logs/`に警告を書きます）。そのため、あるセッションの`symtrace-mcp stats`が空でも、それだけではツールが使われなかったとは言えません。
+2. **言語サーバーのインデックス作成が終わっている。** 大きなワークスペースでは、rust-analyzerの読み込みが終わるまで、最初の呼び出しが「language server is still indexing」エラーを返すことがあります。`index_timeout_secs`を大きくし（[インデックスのタイムアウト](#インデックスのタイムアウト)を参照）、`.symtrace/logs/`にインデックス待ちの警告がないか確認します。
+3. **4つの項目がすべてインストールされている。** `symtrace-mcp setup --status`で、prompt、explore、hook、mcpのすべてが`installed v<version>`になっていることを確認します。`outdated`なら`setup`を再実行します。`modified`はブロックが手で編集されているという意味なので、`--force`を付けて再実行して置き換えます。
+4. **Exploreサブエージェントにブロックが入っている。** Exploreサブエージェントに任された検索は、`CLAUDE.md`ではなく`~/.claude/agents/Explore.md`を読みます。このファイルにマーカーブロックと、frontmatterの`disallowedTools: Write, Edit, NotebookEdit`（または`tools:`）の行が必要です。
 
 ### 組み込みLSPプラグインではなくsymtrace-mcpを選ぶ理由（2026年5月時点）
 

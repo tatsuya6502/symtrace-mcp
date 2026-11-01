@@ -178,7 +178,7 @@ Options:
 - `--skip-prompt` / `--skip-explore` / `--skip-hook` / `--skip-mcp`: leave that item alone
 - `--force`: replace a block or MCP entry you edited by hand (otherwise `setup` refuses and exits non-zero)
 - `--status`: show `installed v<version>` / `outdated v<version>` / `modified` / `absent` per item. The hook and MCP entries record no version, so they show the running binary's version when their command is the bare `symtrace-mcp` or a path to the running binary, and a bare `installed` when it points at another install
-- `--uninstall`: remove only what `setup` added; other content in those files is preserved
+- `--uninstall`: remove only what `setup` added; other content in those files is preserved. An `Explore.md` that `setup` created is deleted, but a `CLAUDE.md` or JSON file that `setup` created is left behind empty
 
 By default `setup` installs four things in your per-user Claude Code files (`--local` targets the project files instead):
 
@@ -191,9 +191,18 @@ By default `setup` installs four things in your per-user Claude Code files (`--l
 
 Why: in Claude Code auto mode the model prefers Bash, so for "who calls X" it reaches for `sb callers` or `grep` and never picks an MCP tool unless an instruction names `sb` explicitly. The block fixes that; the hook reinforces it.
 
-The hook reads each `Bash`/`Grep` call and, when it is `sb callers|callees|implements|impact|trace`, a `grep` or `rg` command over source code whose pattern is a bare identifier, or a `Grep` tool call with a bare identifier, lets the call run and attaches a reminder naming the matching symtrace-mcp tool. It never blocks a call. Set `SYMTRACE_HOOK_SRC_DIRS="src|crates"` to change which directories count as source code.
+The hook reads each `Bash`/`Grep` call and, when it is `sb callers|callees|implements|impact|trace`, a `grep` or `rg` command over source code whose pattern is a bare identifier, or a `Grep` tool call with a bare identifier, lets the call run and attaches a reminder naming the matching symtrace-mcp tool. It never blocks a call. Set `SYMTRACE_HOOK_SRC_DIRS="src|crates"` to change which directories count as source code. The hook does not see a `grep` behind a wrapper that takes a flag value, such as `git -C <dir> grep`, `sudo -u <user> grep` or `nice -n <N> grep`; those calls run without a reminder.
 
 Re-running `setup` after upgrading symtrace-mcp updates the block to the new version. The hook and MCP entries use the bare command name `symtrace-mcp`, so the binary must be on `PATH` for Claude Code: run the `cargo install` command above before `setup`. If `PATH` resolves to a different binary than the one running `setup` (for example an older install while you run `target/debug/symtrace-mcp`), `setup` prints a warning; an old binary without the `hook` subcommand would make Claude Code block every `Bash` and `Grep` call.
+
+### Troubleshooting: the model keeps using `sb` or `grep`
+
+When Claude Code answers "who calls X" with `sb callers` or `grep` even though symtrace-mcp is installed, check these in order:
+
+1. **The MCP server is connected.** Run `/mcp` in Claude Code and confirm `symtrace-mcp` is listed as connected. Two symtrace-mcp processes in the same directory are fine: the second one cannot open the stats database and runs with usage statistics disabled (it logs a warning in `.symtrace/logs/`), so an empty `symtrace-mcp stats` for a session does not by itself mean the tools went unused.
+2. **The language server finished indexing.** On a large workspace the first calls may return the "language server is still indexing" error until rust-analyzer has loaded it; raise `index_timeout_secs` (see [Index timeout](#index-timeout)) and check `.symtrace/logs/` for the index-wait warning.
+3. **All four items are installed.** `symtrace-mcp setup --status` should show `installed v<version>` for prompt, explore, hook and mcp. `outdated` means re-run `setup`; `modified` means the block was edited by hand, so re-run with `--force` to replace it.
+4. **The Explore subagent carries the block.** Searches delegated to the Explore subagent read `~/.claude/agents/Explore.md`, not `CLAUDE.md`. That file must contain the marker block and a `disallowedTools: Write, Edit, NotebookEdit` (or `tools:`) line in its frontmatter.
 
 ### Why symtrace-mcp over built-in LSP plugins? *(as of May 2026)*
 
