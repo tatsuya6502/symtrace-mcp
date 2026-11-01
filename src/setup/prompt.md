@@ -1,10 +1,10 @@
-## Semantic queries: use symtrace-mcp tools first, not `sb` or `grep`
+## Semantic queries: use symtrace-mcp tools, not `sb` or `grep`
 
-`sb callers` / `sb callees` / `sb implements` / `sb impact` / `sb trace` are
-tree-sitter heuristics: they do not resolve types, traits, generics, or
-re-exports, and they report `Inferred` / `Ambiguous` edges. For the questions
-below, call the symtrace-mcp MCP tool FIRST (load it with
-`ToolSearch("select:mcp__symtrace-mcp__<tool>")` if deferred) and use `sb`
+For the questions below, use the symtrace-mcp MCP tool (load it with
+`ToolSearch("select:mcp__symtrace-mcp__<tool>")` if deferred).
+`sb callers` / `sb callees` / `sb implements` / `sb impact` / `sb trace`
+are tree-sitter heuristics: they do not resolve types, traits, generics,
+or re-exports and report `Inferred` / `Ambiguous` edges, so use `sb`
 only for structural overview (`map`, `digest`, `surface`, `deps`).
 
 | Question | Call this, not `sb`/`grep` |
@@ -16,5 +16,4 @@ only for structural overview (`map`, `digest`, `surface`, `deps`).
 | Where is this used? | `mcp__symtrace-mcp__find_references` |
 | What type is this? | `mcp__symtrace-mcp__hover` |
 
-The MCP call is read-only and cheap; a Bash `sb`/`grep` answer for these
-questions is not acceptable as the final answer.
+The MCP call is read-only and cheap.
