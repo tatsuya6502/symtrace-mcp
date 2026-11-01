@@ -156,7 +156,7 @@ claude plugin disable rust-analyzer-lsp@claude-plugins-official
 最新リリースを、CargoでGitHubから直接インストールします。
 
 ```bash
-cargo install --locked --git https://github.com/tatsuya6502/symtrace-mcp.git --tag v0.7.0
+cargo install --locked --git https://github.com/tatsuya6502/symtrace-mcp.git --tag v0.7.1
 ```
 
 `--tag`を省くと、`main`ブランチをビルドします。インストールされたバージョンは`symtrace-mcp --version`（または`-V`）で確認できます。
