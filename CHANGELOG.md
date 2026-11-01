@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The prompt snippet that `symtrace-mcp setup` installs into `~/.claude/CLAUDE.md` and `~/.claude/agents/Explore.md` now leads with the positive instruction and drops the "FIRST" / "not acceptable" wording. The rule itself (symtrace-mcp tools for semantic questions, `sb` for structural overview) is unchanged (#46).
+- Dependencies refreshed within the ranges declared in `Cargo.toml` (`cargo update`): turso 0.6.0 → 0.6.1, tokio 1.52.3 → 1.54.1, clap 4.6.1 → 4.6.7, serde_json 1.0.149 → 1.0.154, toml 1.1.2 → 1.1.8, and the rest of the lockfile.
 
 ## [0.7.0] — 2026-10-25
 
