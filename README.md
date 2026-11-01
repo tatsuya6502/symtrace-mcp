@@ -156,7 +156,7 @@ The last step can also be done by adding `"rust-analyzer-lsp@claude-plugins-offi
 Install the latest release with Cargo straight from GitHub:
 
 ```bash
-cargo install --locked --git https://github.com/tatsuya6502/symtrace-mcp.git --tag v0.7.0
+cargo install --locked --git https://github.com/tatsuya6502/symtrace-mcp.git --tag v0.7.1
 ```
 
 Omit `--tag` to build the `main` branch instead. Check which version is installed with `symtrace-mcp --version` (or `-V`).
